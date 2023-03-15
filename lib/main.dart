@@ -1,4 +1,5 @@
 // import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'dart:io';
 
@@ -16,11 +17,15 @@ import 'package:fireout/ui/screens/login/login_screen.dart';
 void main() async {
   /// Initialize packages
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+
   if (Platform.isAndroid) {
     await FlutterDisplayMode.setHighRefreshRate();
   }
+
   final tmpDir = await getTemporaryDirectory();
   Hive.init(tmpDir.toString());
+
   final storage = await HydratedStorage.build(
     storageDirectory: tmpDir,
   );

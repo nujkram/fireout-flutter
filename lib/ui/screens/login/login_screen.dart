@@ -1,8 +1,12 @@
-import 'package:fireout/cubit/bottom_nav_cubit.dart';
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:fireout/constant/colors.dart';
+import 'package:fireout/cubit/bottom_nav_cubit.dart';
 import 'package:fireout/ui/screens/login/widgets/textfield.dart';
+import 'package:fireout/ui/widgets/custom_button.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -16,11 +20,19 @@ class _LoginScreenState extends State<LoginScreen> {
   TextEditingController phoneCtrl = TextEditingController();
   TextEditingController codeCtrl = TextEditingController();
   String verificationIdReceived = '';
+
+  bool isComplete = false;
+  bool isPhoneNotEmpty = false;
   bool isVisible = false;
 
   @override
   void initState() {
     super.initState();
+    phoneCtrl.addListener(() {
+      setState(() {
+        isPhoneNotEmpty = phoneCtrl.text.isNotEmpty;
+      });
+    });
   }
 
   Widget _buildBody() {
@@ -58,6 +70,30 @@ class _LoginScreenState extends State<LoginScreen> {
                     inputType: TextInputType.text,
                     isVisible: false,
                   ),
+                  const SizedBox(height: 10),
+                  CustomButton(
+                    onPressed: (!isComplete)
+                        ? null
+                        : () {
+                            if (phoneCtrl.text.isEmpty) return;
+
+                            if (isVisible) {
+                              bool isVerified = verifyCode() as bool;
+                              if (isVerified) {
+                                print('User verified');
+                              }
+                            } else {
+                              verifyNumber();
+                            }
+                          },
+                    text: (isVisible) ? 'Verify' : 'Login',
+                    minimumSize: const Size(88, 35),
+                    textStyle: const TextStyle(fontSize: 15),
+                    borderRadius: 8,
+                    bgColor: (!isComplete)
+                        ? CColors.buttonGrey
+                        : CColors.buttonGreen,
+                  )
                 ],
               ),
             )
@@ -69,6 +105,13 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    setState(() {
+      if (isPhoneNotEmpty) {
+        isComplete = true;
+      } else {
+        isComplete = false;
+      }
+    });
     return BlocConsumer<BottomNavCubit, int>(
       listener: (context, state) {
         context.read<BottomNavCubit>().updateIndex(0);
@@ -83,5 +126,32 @@ class _LoginScreenState extends State<LoginScreen> {
             ));
       },
     );
+  }
+
+  void verifyNumber() {
+    auth.verifyPhoneNumber(
+        phoneNumber: phoneCtrl.text,
+        verificationCompleted: (PhoneAuthCredential credential) async {
+          await auth
+              .signInWithCredential(credential)
+              .then((value) => {log('You are logged in', name: 'fireout')});
+        },
+        verificationFailed: (FirebaseAuthException exception) {},
+        codeSent: (String verificationId, int? resendToken) {
+          verificationIdReceived = verificationId;
+          isVisible = true;
+          setState(() {});
+        },
+        codeAutoRetrievalTimeout: (String verificationId) {
+          verificationIdReceived = verificationId;
+        });
+  }
+
+  void verifyCode({result = false}) async {
+    PhoneAuthCredential credentail = PhoneAuthProvider.credential(
+        verificationId: verificationIdReceived, smsCode: codeCtrl.text);
+    await auth.signInWithCredential(credentail).then((value) {
+      return true;
+    });
   }
 }
