@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "573007044475",
+    "project_id": "fireout-staging",
+    "storage_bucket": "fireout-staging.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:573007044475:android:622a843002248ec62c67de",
+        "android_client_info": {
+          "package_name": "com.example.fireout"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "573007044475-29duan8h71cv1nklsl0ejkkoj6rmbk3i.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.fireout",
+            "certificate_hash": "b93c7bff0969abe7a30be03bc42c45bfc4ab0def"
+          }
+        },
+        {
+          "client_id": "573007044475-m42mbcph23b9ojeb5omoe7u0aesvgfcd.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCyzwL7lKS1fEI16DTQb3rnHqNQ-gEIoY0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "573007044475-m42mbcph23b9ojeb5omoe7u0aesvgfcd.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
