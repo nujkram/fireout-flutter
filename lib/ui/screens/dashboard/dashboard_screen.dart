@@ -171,7 +171,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               return IncidentCard(
                                 incident: incidents[index],
                                 onTap: () {
-                                  // Navigate to incident details
+                                  Navigator.pushNamed(
+                                    context,
+                                    '/incident-detail',
+                                    arguments: incidents[index],
+                                  );
                                 },
                               );
                             },

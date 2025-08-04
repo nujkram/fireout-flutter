@@ -12,6 +12,8 @@ import 'package:hive/hive.dart';
 import 'package:hydrated_bloc/hydrated_bloc.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:fireout/ui/screens/login/login_screen.dart';
+import 'package:fireout/ui/screens/incident/incident_detail_screen.dart';
+import 'package:fireout/user_dashboard.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -70,6 +72,21 @@ class MyApp extends StatelessWidget {
             theme: state.themeData,
             home: const LoginScreen(),
             debugShowCheckedModeBanner: AppConfig.instance.debugMode,
+            routes: {
+              '/login': (context) => const LoginScreen(),
+              '/dashboard': (context) => const UserDashboard(),
+            },
+            onGenerateRoute: (settings) {
+              switch (settings.name) {
+                case '/incident-detail':
+                  final incident = settings.arguments as Map<String, dynamic>;
+                  return MaterialPageRoute(
+                    builder: (context) => IncidentDetailScreen(incident: incident),
+                  );
+                default:
+                  return null;
+              }
+            },
           );
         },
       ),
