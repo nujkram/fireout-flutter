@@ -1,8 +1,10 @@
 import 'package:fireout/cubit/bottom_nav_cubit.dart';
+import 'package:fireout/services/auth_service.dart';
+import 'package:fireout/user_dashboard.dart';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:fireout/ui/screens/login/widgets/textfield.dart';
+import 'dart:developer';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -12,11 +14,11 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  FirebaseAuth auth = FirebaseAuth.instance;
-  TextEditingController phoneCtrl = TextEditingController();
-  TextEditingController codeCtrl = TextEditingController();
-  String verificationIdReceived = '';
-  bool isVisible = false;
+  final AuthService _authService = AuthService();
+  TextEditingController usernameCtrl = TextEditingController();
+  TextEditingController passwordCtrl = TextEditingController();
+  bool isLoading = false;
+  String? errorMessage;
 
   @override
   void initState() {
@@ -48,15 +50,36 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   CustomTextField(
-                    label: 'Phone',
-                    controller: phoneCtrl,
-                    inputType: TextInputType.phone,
-                  ),
-                  CustomTextField(
-                    label: 'Code',
-                    controller: codeCtrl,
+                    label: 'Username',
+                    controller: usernameCtrl,
                     inputType: TextInputType.text,
-                    isVisible: false,
+                  ),
+                  const SizedBox(height: 20),
+                  CustomTextField(
+                    label: 'Password',
+                    controller: passwordCtrl,
+                    inputType: TextInputType.text,
+                    isVisible: true,
+                    obscureText: true,
+                  ),
+                  const SizedBox(height: 20),
+                  if (errorMessage != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Text(
+                        errorMessage!,
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton(
+                      onPressed: isLoading ? null : handleLogin,
+                      child: isLoading 
+                        ? const CircularProgressIndicator()
+                        : const Text('Login'),
+                    ),
                   ),
                 ],
               ),
@@ -65,6 +88,43 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       ],
     );
+  }
+
+  Future<void> handleLogin() async {
+    setState(() {
+      isLoading = true;
+      errorMessage = null;
+    });
+
+    final username = usernameCtrl.text.trim();
+    final password = passwordCtrl.text.trim();
+
+    if (username.isEmpty || password.isEmpty) {
+      setState(() {
+        isLoading = false;
+        errorMessage = 'Please enter both username and password';
+      });
+      return;
+    }
+
+    final result = await _authService.login(username, password);
+    
+    setState(() {
+      isLoading = false;
+    });
+
+    if (result != null) {
+      log('Login successful', name: 'fireout');
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const UserDashboard())
+      );
+    } else {
+      final error = await _authService.getErrorMessage(username, password);
+      setState(() {
+        errorMessage = error ?? 'Login failed. Please try again.';
+      });
+    }
   }
 
   @override

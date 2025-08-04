@@ -24,7 +24,6 @@ if (flutterVersionName == null) {
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 apply from: "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle"
-apply plugin: 'com.google.gms.google-services'
 
 android {
     compileSdkVersion flutter.compileSdkVersion
@@ -52,6 +51,32 @@ android {
         targetSdkVersion flutter.targetSdkVersion
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
+    }
+
+    flavorDimensions "environment"
+    
+    productFlavors {
+        development {
+            dimension "environment"
+            applicationIdSuffix ".dev"
+            versionNameSuffix "-dev"
+            resValue "string", "app_name", "Fireout Dev"
+            buildConfigField "String", "FLAVOR", '"development"'
+        }
+        
+        staging {
+            dimension "environment"
+            applicationIdSuffix ".staging"
+            versionNameSuffix "-staging"
+            resValue "string", "app_name", "Fireout Staging"
+            buildConfigField "String", "FLAVOR", '"staging"'
+        }
+        
+        production {
+            dimension "environment"
+            resValue "string", "app_name", "Fireout"
+            buildConfigField "String", "FLAVOR", '"production"'
+        }
     }
 
     buildTypes {

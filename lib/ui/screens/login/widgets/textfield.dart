@@ -8,12 +8,14 @@ class CustomTextField extends StatelessWidget {
       required this.label,
       this.inputType = TextInputType.text,
       this.isVisible = true,
+      this.obscureText = false,
       required this.controller,
       this.onFocusChange,
       this.onChange})
       : super(key: key);
   final String label;
   final bool isVisible;
+  final bool obscureText;
   final TextInputType inputType;
   final TextEditingController controller;
   final Function(bool)? onFocusChange;
@@ -45,6 +47,7 @@ class CustomTextField extends StatelessWidget {
                   onChanged: onChange,
                   keyboardType: inputType,
                   controller: controller,
+                  obscureText: obscureText,
                   style: const TextStyle(color: Colors.white),
                   cursorColor: Colors.white,
                   textAlignVertical: TextAlignVertical.center,
