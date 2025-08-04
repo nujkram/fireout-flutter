@@ -14,12 +14,14 @@ class IncidentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final type = incident['type'] ?? 'Unknown';
-    final description = incident['description'] ?? '';
-    final location = incident['location'] ?? '';
-    final priority = incident['priority'] ?? 'MEDIUM';
-    final reportedAt = incident['reportedAt'];
-    final emergencyLevel = incident['emergencyLevel'] ?? 'Moderate';
+    // Handle both old mock data format and new API format
+    final type = incident['incidentType'] ?? incident['type'] ?? 'Unknown';
+    final description = incident['description'] ?? _generateDescription(type);
+    final location = _getLocationString(incident);
+    final priority = incident['priority'] ?? 'HIGH'; // Default to HIGH for active incidents
+    final reportedAt = incident['createdAt'] ?? incident['reportedAt'];
+    final emergencyLevel = incident['emergencyLevel'] ?? 'Critical';
+    final reportedBy = _getReporterName(incident);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -129,6 +131,30 @@ class IncidentCard extends StatelessWidget {
                     ),
                   ],
                 ),
+                if (reportedBy.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.person,
+                        size: 16,
+                        color: Colors.white70,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          'Reported by: $reportedBy',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            color: Colors.white60,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -230,6 +256,56 @@ class IncidentCard extends StatelessWidget {
       }
     } catch (e) {
       return '';
+    }
+  }
+
+  String _getLocationString(Map<String, dynamic> incident) {
+    // Try old format first
+    if (incident['location'] != null && incident['location'] is String) {
+      return incident['location'];
+    }
+    
+    // Handle new API format with incidentLocation object
+    final incidentLocation = incident['incidentLocation'];
+    if (incidentLocation != null && incidentLocation is Map) {
+      final lat = incidentLocation['latitude'];
+      final lng = incidentLocation['longitude'];
+      if (lat != null && lng != null) {
+        return 'Lat: $lat, Lng: $lng';
+      }
+    }
+    
+    return 'Location not available';
+  }
+
+  String _getReporterName(Map<String, dynamic> incident) {
+    // Try old format first
+    if (incident['reportedBy'] != null) {
+      return incident['reportedBy'].toString();
+    }
+    
+    // Handle new API format with caller object
+    final caller = incident['caller'];
+    if (caller != null && caller is Map) {
+      final fullName = caller['fullName'];
+      final username = caller['username'];
+      return fullName ?? username ?? 'Unknown';
+    }
+    
+    return '';
+  }
+
+  String _generateDescription(String type) {
+    switch (type.toLowerCase()) {
+      case 'fire':
+        return 'Fire incident reported - immediate response required';
+      case 'medical':
+      case 'medical emergency':
+        return 'Medical emergency - urgent medical assistance needed';
+      case 'accident':
+        return 'Accident reported - emergency response dispatched';
+      default:
+        return 'Emergency incident - response required';
     }
   }
 }

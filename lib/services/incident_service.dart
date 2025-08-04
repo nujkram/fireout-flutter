@@ -37,6 +37,8 @@ class IncidentService {
         
         if (data is List) {
           return List<Map<String, dynamic>>.from(data);
+        } else if (data is Map && data['response'] != null) {
+          return List<Map<String, dynamic>>.from(data['response']);
         } else if (data is Map && data['incidents'] != null) {
           return List<Map<String, dynamic>>.from(data['incidents']);
         }
