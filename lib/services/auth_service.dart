@@ -1,7 +1,10 @@
 import 'package:dio/dio.dart';
+import 'package:dio_cookie_manager/dio_cookie_manager.dart';
+import 'package:cookie_jar/cookie_jar.dart';
 import 'package:fireout/config/app_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:convert';
 
 class AuthService {
@@ -14,9 +17,35 @@ class AuthService {
     receiveTimeout: const Duration(seconds: 10),
   ));
   String get baseUrl => AppConfig.instance.baseUrl;
+
+  void setupCookieManager() {
+    if (!kIsWeb) {
+      _dio.interceptors.add(CookieManager(CookieJar()));
+    }
+  }
   
   String? _authToken;
   String? get authToken => _authToken;
+  
+  Future<String?> getUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userDataStr = prefs.getString('user_data');
+    if (userDataStr != null) {
+      final userData = jsonDecode(userDataStr);
+      return userData['_id'] ?? userData['id'];
+    }
+    return null;
+  }
+
+  Future<String?> getUserPhone() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userDataStr = prefs.getString('user_data');
+    if (userDataStr != null) {
+      final userData = jsonDecode(userDataStr);
+      return userData['phone'];
+    }
+    return null;
+  }
 
   Future<void> initializeAuth() async {
     final prefs = await SharedPreferences.getInstance();
@@ -67,6 +96,7 @@ class AuthService {
           // Store user data for session management
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString('user_data', jsonEncode(data['user']));
+          await prefs.setString('user_role', data['user']['role'] ?? 'USER');
           
           // Store the actual JWT token if provided by server
           if (data['token'] != null) {
@@ -149,6 +179,8 @@ class AuthService {
     
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
+    await prefs.remove('user_data');
+    await prefs.remove('user_role');
   }
 
   bool get isAuthenticated => _authToken != null;
@@ -174,6 +206,34 @@ class AuthService {
       print('✅ User data updated in storage');
     } catch (e) {
       print('❌ Error updating stored user data: $e');
+    }
+  }
+
+  Future<String?> getUserRole() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('user_role');
+    } catch (e) {
+      print('❌ Error getting user role: $e');
+      return null;
+    }
+  }
+
+  Future<bool> hasRole(String role) async {
+    final userRole = await getUserRole();
+    return userRole == role;
+  }
+
+  Future<String> getAppropriateHomeRoute() async {
+    final role = await getUserRole();
+    switch (role) {
+      case 'ADMINISTRATOR':
+      case 'MANAGER':
+      case 'OFFICER':
+        return '/dashboard';
+      case 'USER':
+      default:
+        return '/user-dashboard';
     }
   }
 }

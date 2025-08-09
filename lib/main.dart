@@ -8,11 +8,18 @@ import 'package:fireout/config/app_config.dart';
 import 'package:fireout/cubit/bottom_nav_cubit.dart';
 import 'package:fireout/cubit/theme_cubit.dart';
 import 'package:fireout/services/auth_service.dart';
-import 'package:hive/hive.dart';
 import 'package:hydrated_bloc/hydrated_bloc.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:fireout/ui/screens/login/login_screen.dart';
 import 'package:fireout/ui/screens/incident/incident_detail_screen.dart';
+import 'package:fireout/ui/screens/role_based_main_screen.dart';
+import 'package:fireout/ui/screens/user/user_dashboard_screen.dart';
+import 'package:fireout/ui/screens/user/report_incident_screen.dart';
+import 'package:fireout/ui/screens/user/user_incident_history_screen.dart';
+import 'package:fireout/ui/screens/user/user_incident_detail_screen.dart';
+import 'package:fireout/ui/screens/dashboard/dashboard_screen.dart';
+import 'package:fireout/ui/screens/profile/profile_screen.dart';
+import 'package:fireout/ui/widgets/role_guard_route.dart';
 import 'package:fireout/user_dashboard.dart';
 
 void main() async {
@@ -30,25 +37,17 @@ void main() async {
   }
   
   // Initialize auth service
-  await AuthService().initializeAuth();
+  final authService = AuthService();
+  authService.setupCookieManager();
+  await authService.initializeAuth();
   
-  late HydratedStorage storage;
-  if (kIsWeb) {
-    storage = await HydratedStorage.build(
-      storageDirectory: HydratedStorage.webStorageDirectory,
-    );
-  } else {
-    final tmpDir = await getTemporaryDirectory();
-    Hive.init(tmpDir.toString());
-    storage = await HydratedStorage.build(
-      storageDirectory: tmpDir,
-    );
-  }
-
-  HydratedBlocOverrides.runZoned(
-    () => runApp(const MyApp()),
-    storage: storage,
+  HydratedBloc.storage = await HydratedStorage.build(
+    storageDirectory: kIsWeb
+        ? HydratedStorageDirectory.web
+        : HydratedStorageDirectory((await getTemporaryDirectory()).path),
   );
+
+  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
@@ -74,14 +73,56 @@ class MyApp extends StatelessWidget {
             debugShowCheckedModeBanner: AppConfig.instance.debugMode,
             routes: {
               '/login': (context) => const LoginScreen(),
-              '/dashboard': (context) => const UserDashboard(),
+              
+              // Role-based main routes
+              '/main': (context) => const RoleBasedMainScreen(),
+              
+              // USER role routes
+              '/user-dashboard': (context) => RoleGuardRoute(
+                allowedRoles: const ['USER'],
+                child: const UserDashboardScreen(),
+              ),
+              '/report-incident': (context) => RoleGuardRoute(
+                allowedRoles: const ['USER'],
+                child: const ReportIncidentScreen(),
+              ),
+              '/user-incident-history': (context) => RoleGuardRoute(
+                allowedRoles: const ['USER'],
+                child: const UserIncidentHistoryScreen(),
+              ),
+              
+              // OFFICER+ role routes
+              '/dashboard': (context) => RoleGuardRoute(
+                allowedRoles: const ['OFFICER', 'MANAGER', 'ADMINISTRATOR'],
+                child: const DashboardScreen(),
+              ),
+              
+              // Profile route (accessible to all authenticated users)
+              '/profile': (context) => RoleGuardRoute(
+                allowedRoles: const ['USER', 'OFFICER', 'MANAGER', 'ADMINISTRATOR'],
+                child: const ProfileScreen(),
+              ),
+              
+              // Legacy route for compatibility
+              '/old-dashboard': (context) => const UserDashboard(),
             },
             onGenerateRoute: (settings) {
               switch (settings.name) {
                 case '/incident-detail':
                   final incident = settings.arguments as Map<String, dynamic>;
                   return MaterialPageRoute(
-                    builder: (context) => IncidentDetailScreen(incident: incident),
+                    builder: (context) => RoleGuardRoute(
+                      allowedRoles: const ['OFFICER', 'MANAGER', 'ADMINISTRATOR'],
+                      child: IncidentDetailScreen(incident: incident),
+                    ),
+                  );
+                case '/user-incident-detail':
+                  final incident = settings.arguments as Map<String, dynamic>;
+                  return MaterialPageRoute(
+                    builder: (context) => RoleGuardRoute(
+                      allowedRoles: const ['USER'],
+                      child: UserIncidentDetailScreen(incident: incident),
+                    ),
                   );
                 default:
                   return null;

@@ -115,10 +115,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (result != null) {
       log('Login successful', name: 'fireout');
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const UserDashboard())
-      );
+      Navigator.pushReplacementNamed(context, '/main');
     } else {
       final error = await _authService.getErrorMessage(username, password);
       setState(() {

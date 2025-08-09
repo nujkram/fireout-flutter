@@ -280,26 +280,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     keyboardType: TextInputType.phone,
                   ),
                   const SizedBox(height: 24),
-                  Text(
-                    'Station Assignment',
-                    style: GoogleFonts.poppins(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
+                  // Only show Station Assignment for ADMINISTRATOR, MANAGER, OFFICER roles
+                  if (userData?['role'] != 'USER') ...[
+                    Text(
+                      'Station Assignment',
+                      style: GoogleFonts.poppins(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  StationSelector(
-                    selectedStationId: selectedStationId,
-                    selectedStationName: selectedStationName,
-                    availableStations: availableStations,
-                    onStationChanged: (stationId, stationName) {
-                      setState(() {
-                        selectedStationId = stationId;
-                        selectedStationName = stationName;
-                      });
-                    },
-                  ),
+                    const SizedBox(height: 16),
+                    StationSelector(
+                      selectedStationId: selectedStationId,
+                      selectedStationName: selectedStationName,
+                      availableStations: availableStations,
+                      onStationChanged: (stationId, stationName) {
+                        setState(() {
+                          selectedStationId = stationId;
+                          selectedStationName = stationName;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                   const SizedBox(height: 32),
                   SizedBox(
                     width: double.infinity,

@@ -26,6 +26,8 @@ class AppConfig {
     // Get flavor from build configuration
     const String flavor = String.fromEnvironment('FLAVOR', defaultValue: 'development');
     
+    print('🔧 App Config - Flavor from environment: $flavor');
+    
     Environment environment;
     switch (flavor) {
       case 'staging':
