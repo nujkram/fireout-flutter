@@ -62,7 +62,7 @@ class AppConfig {
         _instance = AppConfig._(
           environment: Environment.production,
           appName: 'Fireout',
-          baseUrl: 'https://api.fireout.com',
+          baseUrl: 'https://fireout-svelte.vercel.app',
           mongoConnectionString: 'mongodb+srv://mark:asdf1234@fire.qrebi.mongodb.net/bfpProduction',
           debugMode: false,
         );
