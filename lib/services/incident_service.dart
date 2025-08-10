@@ -1,28 +1,47 @@
 import 'package:dio/dio.dart';
+import 'package:dio_cookie_manager/dio_cookie_manager.dart';
+import 'package:cookie_jar/cookie_jar.dart';
 import 'package:fireout/config/app_config.dart';
+import 'package:fireout/services/auth_service.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:convert';
 
 class IncidentService {
   static final IncidentService _instance = IncidentService._internal();
   factory IncidentService() => _instance;
-  IncidentService._internal();
+  IncidentService._internal() {
+    _setupDio();
+  }
 
   final Dio _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 10),
-    receiveTimeout: const Duration(seconds: 10),
+    connectTimeout: const Duration(seconds: 30),
+    receiveTimeout: const Duration(seconds: 30),
   ));
   
+  final AuthService _authService = AuthService();
   String get baseUrl => AppConfig.instance.baseUrl;
+
+  void _setupDio() {
+    if (!kIsWeb) {
+      _dio.interceptors.add(CookieManager(CookieJar()));
+    }
+  }
 
   Future<List<Map<String, dynamic>>> getInProgressIncidents() async {
     try {
       print('🔍 Fetching in-progress incidents from: $baseUrl/api/admin/incident/in-progress');
+      
+      final userId = await _authService.getUserId();
       
       final response = await _dio.get(
         '$baseUrl/api/admin/incident/in-progress',
         options: Options(
           headers: {
             'Content-Type': 'application/json',
+            if (_authService.authToken != null)
+              'Authorization': 'Bearer ${_authService.authToken}',
+            if (userId != null)
+              'X-User-ID': userId,
           },
         ),
       );
@@ -60,11 +79,17 @@ class IncidentService {
 
   Future<Map<String, dynamic>?> getIncidentById(String incidentId) async {
     try {
+      final userId = await _authService.getUserId();
+      
       final response = await _dio.get(
-        '$baseUrl/api/incidents/$incidentId',
+        '$baseUrl/api/admin/incident/$incidentId',
         options: Options(
           headers: {
             'Content-Type': 'application/json',
+            if (_authService.authToken != null)
+              'Authorization': 'Bearer ${_authService.authToken}',
+            if (userId != null)
+              'X-User-ID': userId,
           },
         ),
       );
@@ -85,14 +110,20 @@ class IncidentService {
 
   Future<bool> updateIncidentStatus(String incidentId, String status) async {
     try {
+      final userId = await _authService.getUserId();
+      
       final response = await _dio.put(
-        '$baseUrl/api/incidents/$incidentId/status',
-        data: {
+        '$baseUrl/api/admin/incident/$incidentId/status',
+        data: jsonEncode({
           'status': status,
-        },
+        }),
         options: Options(
           headers: {
             'Content-Type': 'application/json',
+            if (_authService.authToken != null)
+              'Authorization': 'Bearer ${_authService.authToken}',
+            if (userId != null)
+              'X-User-ID': userId,
           },
         ),
       );
@@ -105,43 +136,152 @@ class IncidentService {
   }
 
   List<Map<String, dynamic>> _getMockIncidents() {
+    final now = DateTime.now();
     return [
       {
-        '_id': '1',
-        'type': 'Fire',
+        '_id': '68977108c8aaec3aecd89001',
+        'userId': 'JRpizMSn5WSrpByg4',
+        'incidentType': 'Fire',
         'description': 'Building fire at Main Street',
-        'location': 'Main Street, Building 45',
+        'incidentLocation': {
+          'latitude': '14.5995',
+          'longitude': '120.9842',
+        },
+        'status': 'IN-PROGRESS',
+        'createdAt': {
+          '\$date': {
+            '\$numberLong': now.subtract(const Duration(hours: 2)).millisecondsSinceEpoch.toString()
+          }
+        },
+        'updatedAt': {
+          '\$date': {
+            '\$numberLong': now.subtract(const Duration(hours: 1)).millisecondsSinceEpoch.toString()
+          }
+        },
+        'isActive': true,
         'priority': 'HIGH',
-        'status': 'IN_PROGRESS',
-        'reportedBy': 'John Doe',
-        'reportedAt': DateTime.now().subtract(const Duration(hours: 2)).toIso8601String(),
-        'assignedTo': ['Officer Pedro'],
         'emergencyLevel': 'Critical',
+        'files': [
+          {
+            'name': 'fire_incident.jpg',
+            'type': 'image/jpeg',
+            'size': 25000,
+            'data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=='
+          }
+        ],
       },
       {
-        '_id': '2',
-        'type': 'Medical Emergency',
+        '_id': '68977108c8aaec3aecd89002',
+        'userId': 'JRpizMSn5WSrpByg5',
+        'incidentType': 'Medical Emergency',
         'description': 'Heart attack patient needs immediate assistance',
-        'location': 'Oak Avenue, House 12',
+        'incidentLocation': {
+          'latitude': '14.6042',
+          'longitude': '120.9822',
+        },
+        'status': 'IN-PROGRESS',
+        'createdAt': {
+          '\$date': {
+            '\$numberLong': now.subtract(const Duration(minutes: 45)).millisecondsSinceEpoch.toString()
+          }
+        },
+        'updatedAt': {
+          '\$date': {
+            '\$numberLong': now.subtract(const Duration(minutes: 30)).millisecondsSinceEpoch.toString()
+          }
+        },
+        'isActive': true,
         'priority': 'HIGH',
-        'status': 'IN_PROGRESS',
-        'reportedBy': 'Jane Smith',
-        'reportedAt': DateTime.now().subtract(const Duration(minutes: 45)).toIso8601String(),
-        'assignedTo': ['Officer Pedro'],
         'emergencyLevel': 'Critical',
+        'files': [],
       },
       {
-        '_id': '3',
-        'type': 'Accident',
+        '_id': '68977108c8aaec3aecd89003',
+        'userId': 'JRpizMSn5WSrpByg6',
+        'incidentType': 'Traffic Accident',
         'description': 'Car accident with multiple vehicles',
-        'location': 'Highway 101, Mile 23',
+        'incidentLocation': {
+          'latitude': '14.6000',
+          'longitude': '120.9800',
+        },
+        'status': 'IN-PROGRESS',
+        'createdAt': {
+          '\$date': {
+            '\$numberLong': now.subtract(const Duration(hours: 1)).millisecondsSinceEpoch.toString()
+          }
+        },
+        'updatedAt': {
+          '\$date': {
+            '\$numberLong': now.subtract(const Duration(minutes: 15)).millisecondsSinceEpoch.toString()
+          }
+        },
+        'isActive': true,
         'priority': 'MEDIUM',
-        'status': 'IN_PROGRESS',
-        'reportedBy': 'Traffic Control',
-        'reportedAt': DateTime.now().subtract(const Duration(hours: 1)).toIso8601String(),
-        'assignedTo': ['Officer Pedro', 'Officer Maria'],
         'emergencyLevel': 'Moderate',
+        'files': [
+          {
+            'name': 'accident1.jpg',
+            'type': 'image/jpeg',
+            'size': 30000,
+            'data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwABBgABWVUqfgAAAABJRU5ErkJggg=='
+          },
+          {
+            'name': 'accident_video.mp4',
+            'type': 'video/mp4',
+            'size': 150000,
+            'data': 'data_placeholder_for_video'
+          }
+        ],
       },
     ];
+  }
+
+  Future<Map<String, dynamic>?> getUserById(String userId) async {
+    try {
+      final currentUserId = await _authService.getUserId();
+      
+      final response = await _dio.get(
+        '$baseUrl/api/admin/users/$userId',
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            if (_authService.authToken != null)
+              'Authorization': 'Bearer ${_authService.authToken}',
+            if (currentUserId != null)
+              'X-User-ID': currentUserId,
+          },
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        // Handle both parsed JSON and JSON string responses
+        if (response.data is String) {
+          return jsonDecode(response.data);
+        } else {
+          return response.data;
+        }
+      }
+      
+      return null;
+    } catch (e) {
+      print('🚨 Error fetching user details: $e');
+      // Return mock user data based on the structure you provided
+      return _getMockUserById(userId);
+    }
+  }
+
+  Map<String, dynamic>? _getMockUserById(String userId) {
+    // Mock user data based on your provided structure
+    return {
+      '_id': userId,
+      'fullName': 'JUAN DELA CRUZ',
+      'firstName': 'JUAN',
+      'lastName': 'DELA CRUZ',
+      'username': 'juan.delacruz',
+      'phone': '+639171234570',
+      'email': 'juandelacruz@gmail.com',
+      'role': 'USER',
+      'isActive': true,
+    };
   }
 }

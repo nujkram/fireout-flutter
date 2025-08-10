@@ -56,20 +56,33 @@ class UserIncidentService {
       // Prepare media metadata via presigned upload or base64 inline (small files)
       List<Map<String, dynamic>> mediaMetadata = [];
       if (mediaFiles != null && mediaFiles.isNotEmpty) {
+        print('📁 Starting media preparation for ${mediaFiles.length} files...');
         mediaMetadata = await _prepareMediaMetadata(mediaFiles);
+        print('📁 Media preparation complete. Metadata array length: ${mediaMetadata.length}');
+      } else {
+        print('📁 No media files provided for incident submission');
       }
 
       final payload = {
         'userId': userId,
         'incidentType': incidentType,
-        'latitude': latitude,
-        'longitude': longitude,
+        'latitude': latitude.toString(),
+        'longitude': longitude.toString(),
+        'createdBy': userId, // Add createdBy field
         if (userPhone != null && userPhone.isNotEmpty)
           'userPhone': userPhone,
         if (description != null && description.isNotEmpty)
           'description': description,
         if (mediaMetadata.isNotEmpty) 'files': mediaMetadata,
       };
+
+      print('📋 Complete payload being sent:');
+      print('📋 Payload keys: ${payload.keys.toList()}');
+      print('📋 Files array included: ${payload.containsKey('files')}');
+      if (payload.containsKey('files')) {
+        print('📋 Files array length: ${(payload['files'] as List).length}');
+      }
+      print('📋 Full payload: ${jsonEncode(payload)}');
 
       final response = await _dio.post(
         '$baseUrl/api/user/incident',
@@ -120,22 +133,27 @@ class UserIncidentService {
     for (int i = 0; i < mediaFiles.length; i++) {
       final xfile = mediaFiles[i];
       final fileName = _inferFileName(xfile, i);
+      print('📁 Processing file: $fileName (path: ${xfile.path})');
+      
       final bytes = await xfile.readAsBytes();
       final size = bytes.length;
       final contentType = _inferContentType(fileName);
+      print('📁 File size: ${(size / 1024).toStringAsFixed(1)} KB, type: $contentType');
 
       // For now, use base64 inline upload only since presigned upload endpoint doesn't exist
       // TODO: Implement presigned upload when backend endpoint is available
       
       if (size <= _inlineBase64MaxBytes) {
         final base64Data = base64Encode(bytes);
-        result.add({
+        final fileMetadata = {
           'name': fileName,
           'type': contentType,
           'size': size,
-          'data': base64Data,
-        });
-        print('📎 Using base64 inline upload for $fileName (${(size / 1024).toStringAsFixed(1)} KB)');
+          'dataBase64': base64Data, // Changed from 'data' to 'dataBase64' to match backend expectations
+        };
+        result.add(fileMetadata);
+        print('📎 Successfully encoded $fileName - base64 length: ${base64Data.length} chars');
+        print('📎 File metadata: ${jsonEncode(fileMetadata).substring(0, 200)}...');
       } else {
         throw IncidentSubmissionException(
           'File ${fileName} is too large (${(size / 1024).toStringAsFixed(0)} KB). Maximum size for inline upload is ${(_inlineBase64MaxBytes / 1024).toStringAsFixed(0)} KB.',
@@ -143,6 +161,7 @@ class UserIncidentService {
       }
     }
 
+    print('📁 Total files prepared: ${result.length}');
     return result;
   }
 

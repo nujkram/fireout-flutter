@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:location/location.dart' as loc;
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart' as permission_handler;
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:fireout/services/user_incident_service.dart';
 // Platform-specific file import is not needed; using XFile for cross-platform
 
@@ -22,10 +23,21 @@ class _ReportIncidentScreenState extends State<ReportIncidentScreen> {
 
   String? selectedIncidentType;
   loc.LocationData? currentLocation;
+  loc.LocationData? selectedLocation;
   // Use XFile to support web and mobile; convert to File only on mobile when needed
   List<XFile> selectedMedia = [];
   bool isSubmitting = false;
   bool isLoadingLocation = false;
+  bool showMapPicker = false;
+  GoogleMapController? mapController;
+  Set<Marker> markers = {};
+  
+  // Distance limit in meters (2km default)
+  static const double maxDistanceFromUser = 2000;
+  
+  // Default location: Roxas City, Capiz, Philippines
+  static const double defaultLatitude = 11.5877;
+  static const double defaultLongitude = 122.7519;
 
   final List<String> incidentTypes = [
     'Fire',
@@ -39,7 +51,22 @@ class _ReportIncidentScreenState extends State<ReportIncidentScreen> {
   @override
   void initState() {
     super.initState();
+    // Initialize with Roxas City as default location
+    _initializeWithDefaultLocation();
     _requestLocationPermission();
+  }
+  
+  void _initializeWithDefaultLocation() {
+    setState(() {
+      currentLocation = loc.LocationData.fromMap({
+        'latitude': defaultLatitude,
+        'longitude': defaultLongitude,
+      });
+      
+      selectedLocation = currentLocation;
+      
+      print('📍 Initialized with Roxas City default location');
+    });
   }
 
   @override
@@ -61,29 +88,107 @@ class _ReportIncidentScreenState extends State<ReportIncidentScreen> {
     setState(() => isLoadingLocation = true);
     
     try {
-      final serviceEnabled = await loc.Location().serviceEnabled();
+      // Check location service status
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      print('📍 Location service enabled: $serviceEnabled');
+      
       if (!serviceEnabled) {
-        final enabled = await loc.Location().requestService();
+        final locService = loc.Location();
+        final enabled = await locService.requestService();
+        print('📍 Location service request result: $enabled');
         if (!enabled) {
           setState(() => isLoadingLocation = false);
+          _showLocationPermissionDialog();
           return;
         }
       }
+      
+      // Check permission status
+      LocationPermission permission = await Geolocator.checkPermission();
+      print('📍 Current permission: $permission');
+      
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        print('📍 Permission after request: $permission');
+        if (permission == LocationPermission.denied) {
+          setState(() => isLoadingLocation = false);
+          _showLocationPermissionDialog();
+          return;
+        }
+      }
+      
+      if (permission == LocationPermission.deniedForever) {
+        setState(() => isLoadingLocation = false);
+        _showLocationPermissionDialog();
+        return;
+      }
 
+      // First try to get the last known position to check if it's reasonable
+      try {
+        final lastPosition = await Geolocator.getLastKnownPosition();
+        if (lastPosition != null) {
+          print('📍 Last known position - Lat: ${lastPosition.latitude}, Lng: ${lastPosition.longitude}');
+          print('📍 Last position age: ${DateTime.now().difference(lastPosition.timestamp!).inMinutes} minutes old');
+        }
+      } catch (e) {
+        print('📍 No last known position available');
+      }
+      
+      // Get current position with high accuracy and force fresh location
       final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
+        forceAndroidLocationManager: false, // Use Google Play Services for better accuracy
+        timeLimit: const Duration(seconds: 30), // Timeout after 30 seconds
       );
       
+      print('📍 Raw GPS Position - Lat: ${position.latitude}, Lng: ${position.longitude}');
+      print('📍 Position accuracy: ${position.accuracy} meters');
+      print('📍 Position timestamp: ${position.timestamp}');
+      
       setState(() {
+        // Update current location with GPS data
         currentLocation = loc.LocationData.fromMap({
           'latitude': position.latitude,
           'longitude': position.longitude,
         });
+        
+        // Update selected location to GPS location (only if user hasn't manually selected a custom location)
+        if (_isSelectedLocationCurrentLocation() || selectedLocation == null) {
+          selectedLocation = currentLocation;
+        }
+        
+        print('📍 Updated with GPS location - Lat: ${currentLocation!.latitude}, Lng: ${currentLocation!.longitude}');
+        print('📍 Selected location - Lat: ${selectedLocation!.latitude}, Lng: ${selectedLocation!.longitude}');
+        
         isLoadingLocation = false;
       });
+      
+      // Show success message for GPS location
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('GPS location obtained successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     } catch (e) {
-      setState(() => isLoadingLocation = false);
-      _showLocationError();
+      print('📍 GPS location failed, keeping default Roxas City location: $e');
+      setState(() {
+        isLoadingLocation = false;
+      });
+      
+      // Show a message that GPS failed but we're using default location
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('GPS unavailable. Using Roxas City as default location. You can adjust the location on the map if needed.'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
     }
   }
 
@@ -227,7 +332,10 @@ class _ReportIncidentScreenState extends State<ReportIncidentScreen> {
       );
       return;
     }
-    if (currentLocation == null) {
+    // Use selected location if available, otherwise current location
+    final locationToUse = selectedLocation ?? currentLocation;
+    
+    if (locationToUse == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Location is required to submit an incident'),
@@ -242,8 +350,8 @@ class _ReportIncidentScreenState extends State<ReportIncidentScreen> {
     try {
       final result = await _incidentService.submitIncident(
         incidentType: selectedIncidentType!,
-        latitude: currentLocation!.latitude!,
-        longitude: currentLocation!.longitude!,
+        latitude: locationToUse!.latitude!,
+        longitude: locationToUse!.longitude!,
         mediaFiles: selectedMedia.isNotEmpty ? selectedMedia : null,
         description: _descriptionController.text.trim(),
       );
@@ -274,6 +382,336 @@ class _ReportIncidentScreenState extends State<ReportIncidentScreen> {
     } finally {
       setState(() => isSubmitting = false);
     }
+  }
+
+  double? _calculateDistanceFromUser(double lat, double lng) {
+    if (currentLocation == null) return null;
+    
+    return Geolocator.distanceBetween(
+      currentLocation!.latitude!,
+      currentLocation!.longitude!,
+      lat,
+      lng,
+    );
+  }
+
+  void _onMapTapped(LatLng location) {
+    if (currentLocation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Current location not available'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final distance = _calculateDistanceFromUser(location.latitude, location.longitude);
+    
+    if (distance != null && distance > maxDistanceFromUser) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Location is too far from your current position. Maximum distance is ${(maxDistanceFromUser / 1000).toStringAsFixed(1)} km.',
+          ),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      selectedLocation = loc.LocationData.fromMap({
+        'latitude': location.latitude,
+        'longitude': location.longitude,
+      });
+      
+      markers = {
+        Marker(
+          markerId: const MarkerId('selected_location'),
+          position: location,
+          infoWindow: const InfoWindow(
+            title: 'Selected Incident Location',
+          ),
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+        ),
+        if (currentLocation != null)
+          Marker(
+            markerId: const MarkerId('current_location'),
+            position: LatLng(
+              currentLocation!.latitude!,
+              currentLocation!.longitude!,
+            ),
+            infoWindow: const InfoWindow(
+              title: 'Your Current Location',
+            ),
+            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+          ),
+      };
+    });
+  }
+
+  void _resetToCurrentLocation() {
+    setState(() {
+      selectedLocation = null;
+      markers = {};
+      showMapPicker = false;
+    });
+  }
+
+  void _initializeMarkersWithCurrentLocation() {
+    setState(() {
+      // Use actual current location or default to Roxas City
+      final actualLat = currentLocation?.latitude ?? defaultLatitude;
+      final actualLng = currentLocation?.longitude ?? defaultLongitude;
+      
+      // Only set current location as default if no location is selected yet
+      if (selectedLocation == null) {
+        selectedLocation = loc.LocationData.fromMap({
+          'latitude': actualLat,
+          'longitude': actualLng,
+        });
+      }
+      
+      final selectedLat = selectedLocation?.latitude ?? actualLat;
+      final selectedLng = selectedLocation?.longitude ?? actualLng;
+      
+      // Add markers - current location (blue) and selected incident location (red)
+      markers = {
+        Marker(
+          markerId: const MarkerId('current_location'),
+          position: LatLng(actualLat, actualLng),
+          infoWindow: InfoWindow(
+            title: currentLocation != null ? 'Your Current Location' : 'Default Location (Roxas City)',
+            snippet: currentLocation != null ? '' : 'GPS location not available',
+          ),
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+        ),
+        Marker(
+          markerId: const MarkerId('selected_location'),
+          position: LatLng(selectedLat, selectedLng),
+          infoWindow: const InfoWindow(
+            title: 'Selected Incident Location',
+            snippet: 'Tap to change location',
+          ),
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+        ),
+      };
+    });
+  }
+
+  bool _isSelectedLocationCurrentLocation() {
+    if (selectedLocation == null || currentLocation == null) return false;
+    
+    // Compare coordinates with a small tolerance for floating point precision
+    const tolerance = 0.000001;
+    return (selectedLocation!.latitude! - currentLocation!.latitude!).abs() < tolerance &&
+           (selectedLocation!.longitude! - currentLocation!.longitude!).abs() < tolerance;
+  }
+  
+  bool _isUsingDefaultLocation() {
+    if (currentLocation == null) return false;
+    
+    const tolerance = 0.000001;
+    return (currentLocation!.latitude! - defaultLatitude).abs() < tolerance &&
+           (currentLocation!.longitude! - defaultLongitude).abs() < tolerance;
+  }
+
+  void _moveCameraToCurrentLocation() async {
+    if (mapController != null && currentLocation != null) {
+      await mapController!.animateCamera(
+        CameraUpdate.newLatLng(
+          LatLng(
+            currentLocation!.latitude!,
+            currentLocation!.longitude!,
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<Widget> _buildMapWidget() async {
+    try {
+      // Initialize markers with user's current location if not already set
+      if (markers.isEmpty && currentLocation != null) {
+        _initializeMarkersWithCurrentLocation();
+      }
+      
+      // Use selectedLocation, currentLocation, or default to Roxas City for camera position
+      final cameraLat = selectedLocation?.latitude ?? 
+                       currentLocation?.latitude ?? 
+                       defaultLatitude;
+      final cameraLng = selectedLocation?.longitude ?? 
+                       currentLocation?.longitude ?? 
+                       defaultLongitude;
+      
+      print('🗺️ Map centering on: Lat: $cameraLat, Lng: $cameraLng');
+      print('🗺️ Current Location: Lat: ${currentLocation?.latitude}, Lng: ${currentLocation?.longitude}');
+      print('🗺️ Selected Location: Lat: ${selectedLocation?.latitude}, Lng: ${selectedLocation?.longitude}');
+      
+      final map = GoogleMap(
+        initialCameraPosition: CameraPosition(
+          target: LatLng(cameraLat, cameraLng),
+          zoom: 15,
+        ),
+        onMapCreated: (GoogleMapController controller) {
+          mapController = controller;
+          // Move camera to current location after map is created with a slight delay
+          Future.delayed(const Duration(milliseconds: 100), () {
+            _moveCameraToCurrentLocation();
+          });
+        },
+        onTap: _onMapTapped,
+        markers: markers,
+        myLocationEnabled: true,
+        myLocationButtonEnabled: false,
+        zoomControlsEnabled: true,
+        mapType: MapType.normal,
+      );
+      
+      return map;
+    } catch (e) {
+      print('Error creating Google Map: $e');
+      rethrow;
+    }
+  }
+
+  Widget _buildMapFallback() {
+    return Container(
+      color: Colors.white.withOpacity(0.1),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(
+            Icons.map_outlined,
+            size: 64,
+            color: Colors.white54,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Map Unavailable',
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Please use your current location\nor enter coordinates manually',
+            style: GoogleFonts.poppins(
+              color: Colors.white70,
+              fontSize: 14,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: () {
+              _showCoordinateInputDialog();
+            },
+            icon: const Icon(Icons.edit_location),
+            label: Text(
+              'Enter Coordinates',
+              style: GoogleFonts.poppins(),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue.withOpacity(0.8),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCoordinateInputDialog() {
+    final TextEditingController latController = TextEditingController();
+    final TextEditingController lngController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          'Enter Coordinates',
+          style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: latController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Latitude',
+                hintText: 'e.g., 14.5995',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: lngController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Longitude',
+                hintText: 'e.g., 120.9842',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.poppins()),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final lat = double.tryParse(latController.text);
+              final lng = double.tryParse(lngController.text);
+              
+              if (lat != null && lng != null) {
+                final distance = _calculateDistanceFromUser(lat, lng);
+                
+                if (distance != null && distance > maxDistanceFromUser) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Location is too far from your current position. Maximum distance is ${(maxDistanceFromUser / 1000).toStringAsFixed(1)} km.',
+                      ),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                  return;
+                }
+                
+                setState(() {
+                  selectedLocation = loc.LocationData.fromMap({
+                    'latitude': lat,
+                    'longitude': lng,
+                  });
+                });
+                
+                Navigator.pop(context);
+                
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Custom location set successfully'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please enter valid coordinates'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+            child: Text('Set Location', style: GoogleFonts.poppins()),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -415,6 +853,8 @@ class _ReportIncidentScreenState extends State<ReportIncidentScreen> {
   }
 
   Widget _buildLocationSection() {
+    final locationToUse = selectedLocation ?? currentLocation;
+    
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -447,29 +887,29 @@ class _ReportIncidentScreenState extends State<ReportIncidentScreen> {
             ],
           ),
           const SizedBox(height: 12),
+          
+          // Current location status
           if (currentLocation != null) ...[
             Row(
               children: [
-                const Icon(Icons.location_on, color: Colors.green, size: 20),
+                Icon(
+                  _isUsingDefaultLocation() ? Icons.location_city : Icons.location_on, 
+                  color: _isUsingDefaultLocation() ? Colors.orange : Colors.green, 
+                  size: 20
+                ),
                 const SizedBox(width: 8),
                 Text(
-                  'Current location obtained',
+                  _isUsingDefaultLocation() 
+                      ? 'Using default Roxas City location'
+                      : 'Current location obtained',
                   style: GoogleFonts.poppins(
-                    color: Colors.green,
+                    color: _isUsingDefaultLocation() ? Colors.orange : Colors.green,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            Text(
-              'Lat: ${currentLocation!.latitude!.toStringAsFixed(6)}\n'
-              'Lng: ${currentLocation!.longitude!.toStringAsFixed(6)}',
-              style: GoogleFonts.poppins(
-                color: Colors.white70,
-                fontSize: 12,
-              ),
-            ),
           ] else ...[
             Row(
               children: [
@@ -484,20 +924,161 @@ class _ReportIncidentScreenState extends State<ReportIncidentScreen> {
                 ),
               ],
             ),
+            const SizedBox(height: 8),
           ],
-          const SizedBox(height: 12),
-          ElevatedButton.icon(
-            onPressed: isLoadingLocation ? null : _getCurrentLocation,
-            icon: const Icon(Icons.my_location),
-            label: Text(
-              isLoadingLocation ? 'Getting Location...' : 'Refresh Location',
-              style: GoogleFonts.poppins(),
+
+          // Selected location indicator
+          if (selectedLocation != null) ...[
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: _isSelectedLocationCurrentLocation() 
+                    ? Colors.blue.withOpacity(0.2) 
+                    : Colors.orange.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _isSelectedLocationCurrentLocation() ? Icons.my_location : Icons.place, 
+                    color: _isSelectedLocationCurrentLocation() ? Colors.blue : Colors.orange, 
+                    size: 20
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _isSelectedLocationCurrentLocation() 
+                          ? 'Using current location as incident location'
+                          : 'Custom location selected',
+                      style: GoogleFonts.poppins(
+                        color: _isSelectedLocationCurrentLocation() ? Colors.blue : Colors.orange,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                  if (!_isSelectedLocationCurrentLocation())
+                    TextButton(
+                      onPressed: _resetToCurrentLocation,
+                      child: Text(
+                        'Reset',
+                        style: GoogleFonts.poppins(
+                          color: Colors.orange,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white.withOpacity(0.2),
-              foregroundColor: Colors.white,
+            const SizedBox(height: 8),
+          ],
+
+          // Location coordinates
+          if (locationToUse != null) ...[
+            Text(
+              'Lat: ${locationToUse.latitude!.toStringAsFixed(6)}\n'
+              'Lng: ${locationToUse.longitude!.toStringAsFixed(6)}',
+              style: GoogleFonts.poppins(
+                color: Colors.white70,
+                fontSize: 12,
+              ),
             ),
+            const SizedBox(height: 12),
+          ],
+
+          // Action buttons
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: isLoadingLocation ? null : () async {
+                    await _getCurrentLocation();
+                    // Ensure markers are updated if map is visible
+                    if (showMapPicker && currentLocation != null) {
+                      _initializeMarkersWithCurrentLocation();
+                    }
+                  },
+                  icon: const Icon(Icons.my_location),
+                  label: Text(
+                    isLoadingLocation ? 'Getting Location...' : 'Use Current',
+                    style: GoogleFonts.poppins(fontSize: 12),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white.withOpacity(0.2),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      // Initialize markers when opening map for the first time
+                      if (!showMapPicker && markers.isEmpty) {
+                        _initializeMarkersWithCurrentLocation();
+                      }
+                      showMapPicker = !showMapPicker;
+                    });
+                  },
+                  icon: const Icon(Icons.map),
+                  label: Text(
+                    showMapPicker ? 'Hide Map' : 'Pick Location',
+                    style: GoogleFonts.poppins(fontSize: 12),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: showMapPicker 
+                        ? Colors.orange.withOpacity(0.8) 
+                        : Colors.blue.withOpacity(0.8),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+            ],
           ),
+
+          // Map picker (can use default location if GPS not available)
+          if (showMapPicker) ...[
+            const SizedBox(height: 16),
+            Container(
+              height: 250,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white.withOpacity(0.3)),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: FutureBuilder<Widget>(
+                  future: _buildMapWidget(),
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return _buildMapFallback();
+                    }
+                    if (snapshot.hasData) {
+                      return snapshot.data!;
+                    }
+                    return const Center(
+                      child: CircularProgressIndicator(color: Colors.white),
+                    );
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              selectedLocation != null && 
+              selectedLocation!.latitude == currentLocation!.latitude &&
+              selectedLocation!.longitude == currentLocation!.longitude
+                  ? 'Red marker shows current incident location. Tap elsewhere to change (max ${(maxDistanceFromUser / 1000).toStringAsFixed(1)} km from your position)'
+                  : 'Tap on the map to select incident location (max ${(maxDistanceFromUser / 1000).toStringAsFixed(1)} km from your position)',
+              style: GoogleFonts.poppins(
+                color: Colors.white70,
+                fontSize: 12,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
         ],
       ),
     );

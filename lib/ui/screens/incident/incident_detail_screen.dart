@@ -3,7 +3,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/foundation.dart';
-import 'dart:io';
+import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart' as permission_handler;
+import 'package:fireout/services/auth_service.dart';
+import 'package:fireout/services/incident_service.dart';
+import 'dart:convert';
 
 class IncidentDetailScreen extends StatefulWidget {
   final Map<String, dynamic> incident;
@@ -19,14 +23,101 @@ class IncidentDetailScreen extends StatefulWidget {
 
 class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
   bool _isLoadingLocation = false;
+  Position? _currentPosition;
+  String? _userRole;
+  Map<String, dynamic>? _reporterData;
+  bool _isLoadingReporter = false;
+  final AuthService _authService = AuthService();
+  final IncidentService _incidentService = IncidentService();
 
   @override
   void initState() {
     super.initState();
+    _getCurrentLocation();
+    _loadUserRole();
+    _loadReporterData();
+  }
+
+  Future<void> _loadUserRole() async {
+    final role = await _authService.getUserRole();
+    setState(() {
+      _userRole = role;
+    });
+  }
+
+  Future<void> _loadReporterData() async {
+    final userId = widget.incident['userId'];
+    if (userId == null) return;
+
+    setState(() => _isLoadingReporter = true);
+    
+    try {
+      final userData = await _incidentService.getUserById(userId);
+      setState(() {
+        _reporterData = userData;
+        _isLoadingReporter = false;
+      });
+    } catch (e) {
+      setState(() => _isLoadingReporter = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load reporter information: $e'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _getCurrentLocation() async {
+    setState(() => _isLoadingLocation = true);
+    
+    try {
+      final status = await permission_handler.Permission.location.request();
+      if (status != permission_handler.PermissionStatus.granted) {
+        setState(() => _isLoadingLocation = false);
+        return;
+      }
+
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        setState(() => _isLoadingLocation = false);
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      
+      setState(() {
+        _currentPosition = position;
+        _isLoadingLocation = false;
+      });
+    } catch (e) {
+      setState(() => _isLoadingLocation = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to get current location: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _openDirections(double lat, double lng) async {
-    final url = 'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng';
+    String url;
+    
+    if (_currentPosition != null) {
+      // Use current location as starting point
+      url = 'https://www.google.com/maps/dir/${_currentPosition!.latitude},${_currentPosition!.longitude}/$lat,$lng';
+    } else {
+      // Use device's location services to determine starting point
+      url = 'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng';
+    }
+    
     final uri = Uri.parse(url);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri);
@@ -69,11 +160,27 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     }
   }
 
-  String _formatDateTime(String? dateTimeString) {
-    if (dateTimeString == null) return 'Unknown';
+  String _formatDateTime(dynamic dateTimeData) {
+    if (dateTimeData == null) return 'Unknown';
     
     try {
-      final dateTime = DateTime.parse(dateTimeString);
+      DateTime dateTime;
+      
+      if (dateTimeData is Map && dateTimeData['\$date'] != null) {
+        // Handle MongoDB date format: {$date: {$numberLong: "timestamp"}}
+        final dateMap = dateTimeData['\$date'];
+        if (dateMap is Map && dateMap['\$numberLong'] != null) {
+          final timestamp = int.parse(dateMap['\$numberLong'].toString());
+          dateTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+        } else {
+          dateTime = DateTime.parse(dateMap.toString());
+        }
+      } else if (dateTimeData is String) {
+        dateTime = DateTime.parse(dateTimeData);
+      } else {
+        return 'Invalid date format';
+      }
+      
       return DateFormat('MMM dd, yyyy - hh:mm a').format(dateTime);
     } catch (e) {
       return 'Invalid date';
@@ -240,9 +347,8 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final incidentType = widget.incident['incidentType'] ?? 'Unknown';
-    final caller = widget.incident['caller'];
-    final callerName = caller?['fullName'] ?? caller?['username'] ?? 'Unknown';
-    final callerPhone = caller?['phone'] ?? '';
+    final callerName = _reporterData?['fullName'] ?? _reporterData?['username'] ?? 'Loading...';
+    final callerPhone = _reporterData?['phone'] ?? '';
     final status = widget.incident['status'] ?? 'UNKNOWN';
     final createdAt = widget.incident['createdAt'];
     final updatedAt = widget.incident['updatedAt'];
@@ -353,8 +459,32 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                       'Reported By',
                       Icons.person,
                       [
-                        _buildInfoRow('Name', callerName),
-                        if (callerPhone.isNotEmpty) _buildInfoRow('Phone', callerPhone),
+                        if (_isLoadingReporter)
+                          Row(
+                            children: [
+                              const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Loading reporter information...',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 14,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ],
+                          )
+                        else ...[
+                          _buildInfoRow('Name', callerName),
+                          if (callerPhone.isNotEmpty) _buildInfoRow('Phone', callerPhone),
+                          if (_reporterData?['email'] != null) _buildInfoRow('Email', _reporterData!['email']),
+                        ],
                       ],
                     ),
 
@@ -379,68 +509,178 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                       [
                         _buildInfoRow('Coordinates', 
                           '${widget.incident['incidentLocation']?['latitude']}, ${widget.incident['incidentLocation']?['longitude']}'),
+                        if (_currentPosition != null)
+                          _buildInfoRow('Distance', _calculateDistance()),
                       ],
                     ),
 
+                    // Media Files Section
+                    if (widget.incident['files'] != null && (widget.incident['files'] as List).isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      _buildMediaSection(),
+                    ],
+
                     const SizedBox(height: 24),
 
-                    // Action Buttons
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () {
-                              final incidentLocation = widget.incident['incidentLocation'];
-                              if (incidentLocation != null) {
-                                final lat = double.tryParse(incidentLocation['latitude'].toString());
-                                final lng = double.tryParse(incidentLocation['longitude'].toString());
-                                if (lat != null && lng != null) {
-                                  _openDirections(lat, lng);
-                                }
-                              }
-                            },
-                            icon: const Icon(Icons.directions),
-                            label: Text(
-                              'Get Directions',
-                              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
+                    // Current Location Status
+                    if (_isLoadingLocation)
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
                               ),
                             ),
-                          ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Getting your current location...',
+                              style: GoogleFonts.poppins(
+                                color: Colors.orange,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: callerPhone.isNotEmpty 
-                                ? () async {
-                                    final url = 'tel:$callerPhone';
-                                    final uri = Uri.parse(url);
-                                    if (await canLaunchUrl(uri)) {
-                                      await launchUrl(uri);
+                      ),
+
+                    // Action Buttons
+                    Column(
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: _currentPosition == null ? null : () {
+                                  final incidentLocation = widget.incident['incidentLocation'];
+                                  if (incidentLocation != null) {
+                                    final lat = double.tryParse(incidentLocation['latitude'].toString());
+                                    final lng = double.tryParse(incidentLocation['longitude'].toString());
+                                    if (lat != null && lng != null) {
+                                      _openDirections(lat, lng);
                                     }
                                   }
-                                : null,
-                            icon: const Icon(Icons.phone),
-                            label: Text(
-                              'Call Reporter',
-                              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                                },
+                                icon: Icon(_currentPosition != null ? Icons.directions : Icons.location_searching),
+                                label: Text(
+                                  _currentPosition != null ? 'Get Directions' : 'Getting Location...',
+                                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _currentPosition != null ? Colors.blue : Colors.grey,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
                             ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: (!_isLoadingReporter && callerPhone.isNotEmpty) 
+                                    ? () async {
+                                        final url = 'tel:$callerPhone';
+                                        final uri = Uri.parse(url);
+                                        if (await canLaunchUrl(uri)) {
+                                          await launchUrl(uri);
+                                        }
+                                      }
+                                    : null,
+                                icon: _isLoadingReporter 
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                        ),
+                                      )
+                                    : const Icon(Icons.phone),
+                                label: Text(
+                                  _isLoadingReporter 
+                                      ? 'Loading...'
+                                      : callerPhone.isNotEmpty 
+                                          ? 'Call Reporter'
+                                          : 'No Phone Available',
+                                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: (!_isLoadingReporter && callerPhone.isNotEmpty) 
+                                      ? Colors.green 
+                                      : Colors.grey,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        if (widget.incident['status'] == 'IN-PROGRESS' && _canUpdateStatus())
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: () => _showStatusUpdateDialog(),
+                              icon: const Icon(Icons.update),
+                              label: Text(
+                                'Update Status',
+                                style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
                               ),
                             ),
                           ),
-                        ),
+                        
+                        // Show info message for officers who cannot update status
+                        if (widget.incident['status'] == 'IN-PROGRESS' && !_canUpdateStatus() && _userRole == 'OFFICER')
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.info_outline,
+                                  color: Colors.blue,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Only Administrators and Managers can update incident status',
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.blue,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                       ],
                     ),
                   ],
@@ -513,5 +753,315 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
         ],
       ),
     );
+  }
+
+  String _calculateDistance() {
+    if (_currentPosition == null) return 'Unknown';
+    
+    final incidentLocation = widget.incident['incidentLocation'];
+    if (incidentLocation == null) return 'Unknown';
+    
+    final lat = double.tryParse(incidentLocation['latitude']?.toString() ?? '');
+    final lng = double.tryParse(incidentLocation['longitude']?.toString() ?? '');
+    
+    if (lat == null || lng == null) return 'Unknown';
+    
+    final distanceInMeters = Geolocator.distanceBetween(
+      _currentPosition!.latitude,
+      _currentPosition!.longitude,
+      lat,
+      lng,
+    );
+    
+    if (distanceInMeters < 1000) {
+      return '${distanceInMeters.round()} m';
+    } else {
+      return '${(distanceInMeters / 1000).toStringAsFixed(2)} km';
+    }
+  }
+
+  Widget _buildMediaSection() {
+    final mediaFiles = widget.incident['files'] as List<dynamic>;
+    
+    return _buildInfoSection(
+      'Attached Files',
+      Icons.attach_file,
+      [
+        Container(
+          constraints: const BoxConstraints(maxHeight: 300),
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: mediaFiles.length,
+            itemBuilder: (context, index) {
+              return _buildMediaItem(mediaFiles[index]);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMediaItem(Map<String, dynamic> media) {
+    final filename = media['name'] ?? 'Unknown file';
+    final contentType = media['type'] ?? 'unknown';
+    final base64Data = media['data'];
+    final sizeData = media['size'];
+    final size = sizeData is Map ? sizeData['\$numberInt'] != null ? int.tryParse(sizeData['\$numberInt'].toString()) : sizeData['value'] : sizeData;
+    
+    // Display file info
+    final fileInfo = Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            _getFileIcon(contentType),
+            color: Colors.white70,
+            size: 16,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              filename,
+              style: GoogleFonts.poppins(
+                fontSize: 12,
+                color: Colors.white.withOpacity(0.8),
+              ),
+            ),
+          ),
+          if (size != null)
+            Text(
+              '${(size / 1024).toStringAsFixed(1)} KB',
+              style: GoogleFonts.poppins(
+                fontSize: 10,
+                color: Colors.white54,
+              ),
+            ),
+        ],
+      ),
+    );
+
+    if (base64Data == null) {
+      return fileInfo;
+    }
+
+    try {
+      final bytes = base64Decode(base64Data);
+      
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          fileInfo,
+          const SizedBox(height: 8),
+          _buildMediaPreview(bytes, contentType, filename),
+          const SizedBox(height: 12),
+        ],
+      );
+    } catch (e) {
+      return fileInfo;
+    }
+  }
+
+  Widget _buildMediaPreview(Uint8List bytes, String contentType, String filename) {
+    if (contentType.startsWith('image/')) {
+      return _buildImagePreview(bytes, filename);
+    } else if (contentType.startsWith('video/')) {
+      return _buildVideoPreview(filename);
+    } else {
+      return const SizedBox.shrink();
+    }
+  }
+
+  Widget _buildImagePreview(Uint8List bytes, String filename) {
+    return Builder(
+      builder: (context) => GestureDetector(
+        onTap: () => _showFullScreenImage(context, bytes, filename),
+        child: Container(
+          height: 150,
+          width: double.infinity,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white.withOpacity(0.3)),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.memory(
+              bytes,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) {
+                return Container(
+                  color: Colors.white.withOpacity(0.1),
+                  child: const Center(
+                    child: Icon(
+                      Icons.broken_image,
+                      color: Colors.white54,
+                      size: 48,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVideoPreview(String filename) {
+    return Container(
+      height: 150,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withOpacity(0.3)),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(
+            Icons.play_circle_outline,
+            color: Colors.white70,
+            size: 48,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Video File',
+            style: GoogleFonts.poppins(
+              fontSize: 14,
+              color: Colors.white70,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Tap to view details',
+            style: GoogleFonts.poppins(
+              fontSize: 12,
+              color: Colors.white54,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showFullScreenImage(BuildContext context, Uint8List bytes, String filename) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            title: Text(
+              filename,
+              style: GoogleFonts.poppins(color: Colors.white),
+            ),
+            iconTheme: const IconThemeData(color: Colors.white),
+          ),
+          body: Center(
+            child: InteractiveViewer(
+              child: Image.memory(
+                bytes,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) {
+                  return const Center(
+                    child: Icon(
+                      Icons.broken_image,
+                      color: Colors.white54,
+                      size: 64,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _getFileIcon(String contentType) {
+    if (contentType.startsWith('image/')) {
+      return Icons.image;
+    } else if (contentType.startsWith('video/')) {
+      return Icons.videocam;
+    } else {
+      return Icons.attach_file;
+    }
+  }
+
+  bool _canUpdateStatus() {
+    return _userRole == 'ADMINISTRATOR' || _userRole == 'MANAGER';
+  }
+
+  void _showStatusUpdateDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          'Update Incident Status',
+          style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+        ),
+        content: Text(
+          'Are you sure you want to mark this incident as resolved?',
+          style: GoogleFonts.poppins(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.poppins(),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _updateIncidentStatus();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            child: Text(
+              'Mark as Resolved',
+              style: GoogleFonts.poppins(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _updateIncidentStatus() async {
+    try {
+      // You can implement the actual API call here
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Incident status updated to RESOLVED',
+            style: GoogleFonts.poppins(),
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+      
+      // Optionally refresh the incident data or navigate back
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Failed to update status: $e',
+            style: GoogleFonts.poppins(),
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 }

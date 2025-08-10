@@ -239,11 +239,27 @@ class IncidentCard extends StatelessWidget {
     }
   }
 
-  String _formatTime(String? dateTimeString) {
-    if (dateTimeString == null) return '';
+  String _formatTime(dynamic dateTimeData) {
+    if (dateTimeData == null) return '';
     
     try {
-      final dateTime = DateTime.parse(dateTimeString);
+      DateTime dateTime;
+      
+      if (dateTimeData is Map && dateTimeData['\$date'] != null) {
+        // Handle MongoDB date format: {$date: {$numberLong: "timestamp"}}
+        final dateMap = dateTimeData['\$date'];
+        if (dateMap is Map && dateMap['\$numberLong'] != null) {
+          final timestamp = int.parse(dateMap['\$numberLong'].toString());
+          dateTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+        } else {
+          dateTime = DateTime.parse(dateMap.toString());
+        }
+      } else if (dateTimeData is String) {
+        dateTime = DateTime.parse(dateTimeData);
+      } else {
+        return '';
+      }
+      
       final now = DateTime.now();
       final difference = now.difference(dateTime);
 

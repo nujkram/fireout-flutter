@@ -3,7 +3,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:fireout/services/auth_service.dart';
 import 'package:fireout/services/incident_service.dart';
 import 'package:fireout/ui/screens/dashboard/widgets/incident_card.dart';
-import 'dart:convert';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -18,6 +17,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> incidents = [];
   bool isLoading = true;
   String? userFullName;
+  String? userRole;
 
   @override
   void initState() {
@@ -28,9 +28,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _loadUserData() async {
     final userData = await _authService.getCurrentUser();
+    final role = await _authService.getUserRole();
     if (userData != null) {
       setState(() {
         userFullName = userData['fullName'] ?? userData['username'];
+        userRole = role;
       });
     }
   }
@@ -64,7 +66,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       backgroundColor: Theme.of(context).primaryColor,
       appBar: AppBar(
         title: Text(
-          'Officer Dashboard',
+          _getDashboardTitle(),
           style: GoogleFonts.poppins(
             fontSize: 20,
             fontWeight: FontWeight.bold,
@@ -95,7 +97,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Welcome back, ${userFullName ?? 'Officer'}!',
+                'Welcome back, ${userFullName ?? _getDefaultRoleName()}!',
                 style: GoogleFonts.poppins(
                   fontSize: 18,
                   color: Colors.white,
@@ -186,5 +188,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ),
     );
+  }
+
+  String _getDashboardTitle() {
+    switch (userRole) {
+      case 'ADMINISTRATOR':
+        return 'Admin Dashboard';
+      case 'MANAGER':
+        return 'Manager Dashboard';
+      case 'OFFICER':
+        return 'Officer Dashboard';
+      default:
+        return 'Emergency Dashboard';
+    }
+  }
+
+  String _getDefaultRoleName() {
+    switch (userRole) {
+      case 'ADMINISTRATOR':
+        return 'Administrator';
+      case 'MANAGER':
+        return 'Manager';
+      case 'OFFICER':
+        return 'Officer';
+      default:
+        return 'User';
+    }
   }
 }

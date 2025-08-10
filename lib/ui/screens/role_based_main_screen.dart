@@ -95,6 +95,48 @@ class _RoleBasedMainScreenState extends State<RoleBasedMainScreen> {
   }
 
   Widget _buildOfficerNavigation() {
-    return const DashboardScreen();
+    final screens = [
+      const DashboardScreen(),
+      const ProfileScreen(),
+    ];
+
+    return Scaffold(
+      body: IndexedStack(
+        index: _currentIndex,
+        children: screens,
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) => setState(() => _currentIndex = index),
+        backgroundColor: Theme.of(context).primaryColor,
+        selectedItemColor: Colors.white,
+        unselectedItemColor: Colors.white54,
+        selectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+        unselectedLabelStyle: GoogleFonts.poppins(),
+        items: [
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.dashboard),
+            label: _getRoleBasedDashboardLabel(),
+          ),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.person),
+            label: 'Profile',
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getRoleBasedDashboardLabel() {
+    switch (userRole) {
+      case 'ADMINISTRATOR':
+        return 'Admin';
+      case 'MANAGER':
+        return 'Manager';
+      case 'OFFICER':
+        return 'Officer';
+      default:
+        return 'Dashboard';
+    }
   }
 }
