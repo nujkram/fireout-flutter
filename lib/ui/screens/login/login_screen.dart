@@ -1,5 +1,6 @@
 import 'package:fireout/cubit/bottom_nav_cubit.dart';
 import 'package:fireout/services/auth_service.dart';
+import 'package:fireout/services/notification_service.dart';
 import 'package:fireout/user_dashboard.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -115,6 +116,14 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (result != null) {
       log('Login successful', name: 'fireout');
+      
+      // Initialize notifications after successful login for admin roles
+      final userRole = await _authService.getUserRole();
+      if (['ADMINISTRATOR', 'MANAGER', 'OFFICER'].contains(userRole)) {
+        final notificationService = NotificationService();
+        await notificationService.refreshToken();
+      }
+      
       Navigator.pushReplacementNamed(context, '/main');
     } else {
       final error = await _authService.getErrorMessage(username, password);

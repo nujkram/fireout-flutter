@@ -8,6 +8,9 @@ import 'package:fireout/config/app_config.dart';
 import 'package:fireout/cubit/bottom_nav_cubit.dart';
 import 'package:fireout/cubit/theme_cubit.dart';
 import 'package:fireout/services/auth_service.dart';
+import 'package:fireout/services/notification_service.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:hydrated_bloc/hydrated_bloc.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:fireout/ui/screens/login/login_screen.dart';
@@ -21,6 +24,11 @@ import 'package:fireout/ui/screens/dashboard/dashboard_screen.dart';
 import 'package:fireout/ui/screens/profile/profile_screen.dart';
 import 'package:fireout/ui/widgets/role_guard_route.dart';
 import 'package:fireout/user_dashboard.dart';
+
+// Background message handler (must be top-level function)
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  print('🔔 Background message received: ${message.messageId}');
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -36,10 +44,29 @@ void main() async {
     // Platform check not supported on web
   }
   
+  // Initialize Firebase BEFORE any Firebase Messaging usage
+  bool firebaseReady = false;
+  try {
+    await Firebase.initializeApp();
+    firebaseReady = true;
+  } catch (e) {
+    // On web, Firebase initialization requires options configured via FlutterFire.
+    // If not configured, skip notifications setup gracefully.
+    // ignore: avoid_print
+    print('🚨 Firebase initialization failed or not configured for this platform: $e');
+  }
+
   // Initialize auth service
   final authService = AuthService();
   authService.setupCookieManager();
   await authService.initializeAuth();
+  
+  // Initialize notification service (only if Firebase is ready)
+  if (firebaseReady) {
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    final notificationService = NotificationService();
+    await notificationService.initialize();
+  }
   
   HydratedBloc.storage = await HydratedStorage.build(
     storageDirectory: kIsWeb

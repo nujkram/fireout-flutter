@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:fireout/services/auth_service.dart';
 import 'package:fireout/services/incident_service.dart';
@@ -18,12 +19,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool isLoading = true;
   String? userFullName;
   String? userRole;
+  Timer? _refreshTimer;
+  bool _isSilentRefreshing = false;
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
     _loadIncidents();
+    // Periodic silent refresh to keep incidents in sync with server
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      _silentRefreshIncidents();
+    });
   }
 
   Future<void> _loadUserData() async {
@@ -58,6 +65,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _refreshIncidents() async {
     await _loadIncidents();
+  }
+
+  Future<void> _silentRefreshIncidents() async {
+    if (_isSilentRefreshing) return;
+    _isSilentRefreshing = true;
+    try {
+      final fetchedIncidents = await _incidentService.getInProgressIncidents();
+      if (!mounted) return;
+      setState(() {
+        incidents = fetchedIncidents;
+      });
+    } catch (_) {
+      // Ignore errors during silent refresh to avoid UI disruption
+    } finally {
+      _isSilentRefreshing = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -177,7 +206,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     context,
                                     '/incident-detail',
                                     arguments: incidents[index],
-                                  );
+                                  ).then((_) => _silentRefreshIncidents());
                                 },
                               );
                             },
