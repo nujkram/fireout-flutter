@@ -2,6 +2,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:fireout/config/app_config.dart';
 import 'package:fireout/services/auth_service.dart';
@@ -15,22 +16,55 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
   final Dio _dio = Dio();
   final AuthService _authService = AuthService();
-  // Removed unused _initialized flag
+  
+  // Track initialization state
+  bool _isInitialized = false;
+  bool _isInitializing = false;
+  
+  // Navigation context for routing
+  static BuildContext? _navigationContext;
 
   String get baseUrl => AppConfig.instance.baseUrl;
 
   Future<void> initialize() async {
+    // Prevent multiple simultaneous initializations
+    if (_isInitialized) {
+      print('🔔 Notification service already initialized');
+      return;
+    }
+    
+    if (_isInitializing) {
+      print('🔔 Notification service initialization in progress, waiting...');
+      // Wait for ongoing initialization to complete
+      int attempts = 0;
+      while (_isInitializing && attempts < 50) { // Wait max 5 seconds
+        await Future.delayed(const Duration(milliseconds: 100));
+        attempts++;
+      }
+      return;
+    }
+    
+    _isInitializing = true;
     print('🔔 Initializing notification service...');
     
     try {
-      // Ensure Firebase is initialized by caller (main.dart)
+      // Check if Firebase is initialized
       if (Firebase.apps.isEmpty) {
-        throw Exception('Firebase is not initialized');
+        print('🚨 Firebase is not initialized, skipping FCM setup');
+        // Continue with local notifications only
+      } else {
+        _firebaseMessaging = FirebaseMessaging.instance;
+        
+        // Get FCM token
+        await _getFCMToken();
+        print('🔔 FCM token obtained');
+
+        // Set up message handlers'sound': kIsWeb ? null : const RawResourceAndroidNotificationSound('fire_alert'),
+        _setupMessageHandlers();
+        print('🔔 Message handlers set up');
       }
 
-      _firebaseMessaging = FirebaseMessaging.instance;
-
-      // Initialize local notifications
+      // Initialize local notifications (always do this)
       await _initializeLocalNotifications();
       print('🔔 Local notifications initialized');
 
@@ -38,17 +72,13 @@ class NotificationService {
       await _requestPermissions();
       print('🔔 Notification permissions requested');
 
-      // Get FCM token
-      await _getFCMToken();
-      print('🔔 FCM token obtained');
-
-      // Set up message handlers
-      _setupMessageHandlers();
-      print('🔔 Message handlers set up');
-
+      _isInitialized = true;
       print('🔔 Notification service initialized successfully');
     } catch (e) {
       print('🚨 Error initializing notification service: $e');
+      // Don't set _isInitialized = true on error, allow retry
+    } finally {
+      _isInitializing = false;
     }
   }
 
@@ -70,18 +100,78 @@ class NotificationService {
       onDidReceiveNotificationResponse: _onNotificationTapped,
     );
 
-    // Create notification channel for Android
+    // Create notification channels for Android with custom sounds (skip on web)
     if (!kIsWeb) {
-      const androidChannel = AndroidNotificationChannel(
+      try {
+        final androidPlugin = _localNotifications
+            .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+      
+      // General incident updates channel with custom sound
+      const generalChannel = AndroidNotificationChannel(
         'incident_updates',
         'Incident Updates',
-        description: 'Notifications for incident status changes',
-        importance: Importance.high,
+        description: 'General incident notifications',
+        importance: Importance.max, // Max importance for sound
+        playSound: true,
+        enableVibration: true,
+        sound: RawResourceAndroidNotificationSound('test_notification'), // Add sound to channel
       );
 
-      await _localNotifications
-          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-          ?.createNotificationChannel(androidChannel);
+      // Fire emergency channel
+      const fireChannel = AndroidNotificationChannel(
+        'fire_incidents',
+        'Fire Emergency',
+        description: 'Fire emergency notifications with custom sound',
+        importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
+        sound: RawResourceAndroidNotificationSound('fire_alert'),
+      );
+
+      // Medical emergency channel
+      const medicalChannel = AndroidNotificationChannel(
+        'medical_incidents',
+        'Medical Emergency',
+        description: 'Medical emergency notifications with custom sound',
+        importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
+        sound: RawResourceAndroidNotificationSound('medical_alert'),
+      );
+
+      // Accident emergency channel
+      const accidentChannel = AndroidNotificationChannel(
+        'accident_incidents',
+        'Accident Emergency',
+        description: 'Accident emergency notifications with custom sound',
+        importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
+        sound: RawResourceAndroidNotificationSound('accident_alert'),
+      );
+        
+        // Delete existing channels first to force recreation with sound
+        try {
+          await androidPlugin?.deleteNotificationChannel('incident_updates');
+          await androidPlugin?.deleteNotificationChannel('fire_incidents');
+          await androidPlugin?.deleteNotificationChannel('medical_incidents');
+          await androidPlugin?.deleteNotificationChannel('accident_incidents');
+        } catch (e) {
+          print('🔔 Old channels not found (expected): $e');
+        }
+        
+        // Create channels with sound
+        await androidPlugin?.createNotificationChannel(generalChannel);
+        await androidPlugin?.createNotificationChannel(fireChannel);
+        await androidPlugin?.createNotificationChannel(medicalChannel);
+        await androidPlugin?.createNotificationChannel(accidentChannel);
+        
+        print('🔔 Android notification channels created successfully');
+      } catch (e) {
+        print('🚨 Error creating notification channels: $e');
+      }
+    } else {
+      print('🔔 Web platform detected, skipping Android notification channels');
     }
   }
 
@@ -203,31 +293,46 @@ class NotificationService {
   Future<void> _handleForegroundMessage(RemoteMessage message) async {
     print('🔔 Received message in foreground: ${message.messageId}');
     print('🔔 Message data: ${message.data}');
-
-    // Show local notification when app is in foreground
-    if (message.notification != null) {
-      await _showLocalNotification(message);
-    }
+    // Always show a local notification in foreground, even for data-only messages
+    // This ensures dashboard-triggered pushes (often data-only) still alert the user
+    await _showLocalNotification(message);
   }
 
   Future<void> _showLocalNotification(RemoteMessage message) async {
-    const androidDetails = AndroidNotificationDetails(
-      'incident_updates',
-      'Incident Updates',
-      channelDescription: 'Notifications for incident status changes',
-      importance: Importance.high,
-      priority: Priority.high,
+    // Determine incident type and channel
+    final incidentType = message.data['incidentType']?.toString().toLowerCase() ?? 'general';
+    final channelConfig = _getChannelConfigForIncidentType(incidentType);
+    
+    final androidDetails = AndroidNotificationDetails(
+      channelConfig['channelId'],
+      channelConfig['channelName'],
+      channelDescription: channelConfig['description'],
+      importance: channelConfig['importance'],
+      priority: channelConfig['priority'],
       showWhen: true,
       icon: '@mipmap/ic_launcher',
+      sound: channelConfig['sound'], // Custom sound for Android (null on web)
+      enableVibration: !kIsWeb && channelConfig['vibration'] != null,
+      vibrationPattern: channelConfig['vibration'], // Will be null on web
+      fullScreenIntent: channelConfig['fullScreen'] && !kIsWeb,
+      largeIcon: kIsWeb ? null : const DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
+      styleInformation: BigTextStyleInformation(
+        message.notification?.body ?? 'An incident status has changed',
+        htmlFormatBigText: false,
+        contentTitle: message.notification?.title ?? 'Incident Update',
+        htmlFormatContentTitle: false,
+      ),
     );
 
-    const iosDetails = DarwinNotificationDetails(
+    final iosDetails = DarwinNotificationDetails(
       presentAlert: true,
       presentBadge: true,
       presentSound: true,
+      sound: channelConfig['iosSound'], // Custom sound for iOS
+      interruptionLevel: channelConfig['interruptionLevel'],
     );
 
-    const notificationDetails = NotificationDetails(
+    final notificationDetails = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
     );
@@ -239,6 +344,8 @@ class NotificationService {
       notificationDetails,
       payload: message.data['incidentId'],
     );
+    
+    print('🔔 Notification shown with ${channelConfig['channelName']} sound for $incidentType incident');
   }
 
   void _handleNotificationTapped(RemoteMessage message) {
@@ -252,6 +359,77 @@ class NotificationService {
     }
   }
 
+  // Helper method to get channel configuration based on incident type
+  Map<String, dynamic> _getChannelConfigForIncidentType(String incidentType) {
+    // Create vibration patterns only for non-web platforms
+    Int64List? createVibrationPattern(List<int> pattern) {
+      if (kIsWeb) return null; // Web doesn't support vibration patterns
+      try {
+        return Int64List.fromList(pattern);
+      } catch (e) {
+        print('🚨 Error creating vibration pattern: $e');
+        return null;
+      }
+    }
+
+    switch (incidentType.toLowerCase()) {
+      case 'fire':
+        return {
+          'channelId': 'fire_incidents',
+          'channelName': 'Fire Emergency',
+          'description': 'Fire emergency notifications',
+          'importance': Importance.max,
+          'priority': Priority.max,
+          'sound': kIsWeb ? null : const RawResourceAndroidNotificationSound('fire_alert'), // Use system default for now
+          'iosSound': 'fire_alert.mp3',
+          'vibration': createVibrationPattern([0, 1000, 500, 1000, 500, 1000]), // Strong vibration pattern
+          'fullScreen': !kIsWeb, // Web doesn't support full-screen notifications
+          'interruptionLevel': InterruptionLevel.critical,
+        };
+      case 'medical':
+      case 'medical emergency':
+        return {
+          'channelId': 'medical_incidents',
+          'channelName': 'Medical Emergency',
+          'description': 'Medical emergency notifications',
+          'importance': Importance.max,
+          'priority': Priority.max,
+          'sound': kIsWeb ? null : const RawResourceAndroidNotificationSound('medical_alert'), // Use system default for now
+          'iosSound': 'medical_alert.mp3',
+          'vibration': createVibrationPattern([0, 800, 200, 800, 200, 800]), // Medical pattern
+          'fullScreen': !kIsWeb,
+          'interruptionLevel': InterruptionLevel.critical,
+        };
+      case 'accident':
+      case 'traffic accident':
+        return {
+          'channelId': 'accident_incidents',
+          'channelName': 'Accident Emergency',
+          'description': 'Accident emergency notifications',
+          'importance': Importance.max,
+          'priority': Priority.max,
+          'sound': kIsWeb ? null : const RawResourceAndroidNotificationSound('accident_alert'), // Use system default for now
+          'iosSound': 'accident_alert.mp3',
+          'vibration': createVibrationPattern([0, 600, 300, 600, 300, 600]), // Accident pattern
+          'fullScreen': !kIsWeb,
+          'interruptionLevel': InterruptionLevel.critical,
+        };
+      default:
+        return {
+          'channelId': 'incident_updates',
+          'channelName': 'Incident Updates',
+          'description': 'General incident notifications',
+          'importance': Importance.high,
+          'priority': Priority.high,
+          'sound': kIsWeb ? null : const RawResourceAndroidNotificationSound('general_alert'), // Use system default for now
+          'iosSound': 'general_alert.mp3',
+          'vibration': createVibrationPattern([0, 500, 250, 500]), // Standard pattern
+          'fullScreen': false,
+          'interruptionLevel': InterruptionLevel.timeSensitive,
+        };
+    }
+  }
+
   void _onNotificationTapped(NotificationResponse response) {
     print('🔔 Local notification tapped: ${response.payload}');
     
@@ -260,10 +438,24 @@ class NotificationService {
     }
   }
 
-  void _navigateToIncidentDetail(String incidentId) {
-    // TODO: Implement navigation to incident detail screen
-    // This would typically use Navigator or your app's routing system
+  void _navigateToIncidentDetail(String incidentId) async {
     print('🔔 Navigate to incident detail: $incidentId');
+    
+    if (_navigationContext != null && _navigationContext!.mounted) {
+      try {
+        // Navigate to dashboard where they can find the incident
+        // This avoids the circular dependency with IncidentService
+        Navigator.of(_navigationContext!).pushNamedAndRemoveUntil(
+          '/main',
+          (Route<dynamic> route) => false,
+        );
+        print('🔔 Successfully navigated to dashboard');
+      } catch (e) {
+        print('🚨 Error navigating: $e');
+      }
+    } else {
+      print('🚨 Navigation context not available');
+    }
   }
 
   // Method to be called when user logs out
@@ -287,6 +479,149 @@ class NotificationService {
       }
     } catch (e) {
       print('🚨 Error refreshing FCM token: $e');
+    }
+  }
+  
+  // Static method to set navigation context from the app
+  static void setNavigationContext(BuildContext context) {
+    _navigationContext = context;
+  }
+  
+  // Static method to clear navigation context
+  static void clearNavigationContext() {
+    _navigationContext = null;
+  }
+  
+  // Method to show test notification for debugging
+  Future<void> showTestNotification() async {
+    print('🔔 Starting test notification...');
+    
+    try {
+      // Ensure the notification service is initialized
+      if (!_isInitialized) {
+        print('🔔 Notification service not initialized, initializing now...');
+        await initialize();
+      }
+
+      print('🔔 Creating notification details...');
+      
+      // Create vibration pattern safely for non-web platforms
+      Int64List? vibrationPattern;
+      if (!kIsWeb) {
+        try {
+          vibrationPattern = Int64List.fromList([0, 300, 200, 300]);
+        } catch (e) {
+          print('🚨 Could not create vibration pattern: $e');
+        }
+      }
+      
+      // Debug: Check if sound resource exists
+      print('🔔 Attempting to use sound: test_notification');
+      
+      final androidDetails = AndroidNotificationDetails(
+        'incident_updates',
+        'Test Notification',
+        channelDescription: 'Test notification with custom sound',
+        importance: Importance.max, // Changed to max for sound
+        priority: Priority.max, // Changed to max for sound
+        showWhen: true,
+        icon: '@mipmap/ic_launcher',
+        sound: kIsWeb ? null : const RawResourceAndroidNotificationSound('test_notification'),
+        enableVibration: !kIsWeb,
+        vibrationPattern: vibrationPattern,
+        playSound: true,
+        onlyAlertOnce: false,
+        autoCancel: false, // Keep notification visible
+        ongoing: false, // Allow dismissal
+        silent: false, // Explicitly not silent
+        visibility: NotificationVisibility.public, // Public visibility
+        channelAction: AndroidNotificationChannelAction.update, // Force channel update
+      );
+
+      const iosDetails = DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+        sound: 'test_notification.mp3',
+        interruptionLevel: InterruptionLevel.active,
+      );
+
+      final notificationDetails = NotificationDetails(
+        android: androidDetails,
+        iOS: iosDetails,
+      );
+
+      print('🔔 Showing notification...');
+      
+      try {
+        await _localNotifications.show(
+          999,
+          '🔔 Test Notification',
+          'This is a test notification with custom alert sound!',
+          notificationDetails,
+        );
+        print('🔔 Test notification sent successfully');
+      } catch (e) {
+        if (e.toString().contains('invalid_sound')) {
+          print('🚨 Custom sound failed, trying without sound: $e');
+          
+          // Fallback notification without custom sound
+          final fallbackAndroidDetails = AndroidNotificationDetails(
+            'incident_updates',
+            'Test Notification',
+            channelDescription: 'Test notification (fallback)',
+            importance: Importance.high,
+            priority: Priority.high,
+            showWhen: true,
+            icon: '@mipmap/ic_launcher',
+            enableVibration: !kIsWeb,
+            vibrationPattern: vibrationPattern,
+          );
+          
+          final fallbackNotificationDetails = NotificationDetails(
+            android: fallbackAndroidDetails,
+            iOS: iosDetails,
+          );
+          
+          await _localNotifications.show(
+            999,
+            '🔔 Test Notification',
+            'This is a test notification (using system default sound)!',
+            fallbackNotificationDetails,
+          );
+          print('🔔 Test notification sent successfully (fallback mode)');
+        } else {
+          rethrow; // Re-throw other errors
+        }
+      }
+    } catch (e) {
+      print('🚨 Error in showTestNotification: $e');
+      print('🚨 Stack trace: ${StackTrace.current}');
+      rethrow; // Re-throw so dashboard can show proper error
+    }
+  }
+  
+  // Method to handle incident status change (called from incident service)
+  Future<void> handleIncidentStatusChange(String incidentId, String newStatus, String incidentType) async {
+    if (newStatus == 'IN-PROGRESS') {
+      print('🔔 Incident $incidentId changed to IN-PROGRESS, preparing notification');
+      
+      // This would typically be called from the backend, but we can also
+      // trigger local notifications for immediate feedback
+      final message = RemoteMessage(
+        messageId: DateTime.now().millisecondsSinceEpoch.toString(),
+        notification: RemoteNotification(
+          title: 'Incident Update: $incidentType',
+          body: 'An incident has been updated to IN-PROGRESS status',
+        ),
+        data: {
+          'incidentId': incidentId,
+          'status': newStatus,
+          'incidentType': incidentType,
+        },
+      );
+      
+      await _showLocalNotification(message);
     }
   }
 }

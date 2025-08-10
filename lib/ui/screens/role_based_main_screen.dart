@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fireout/services/auth_service.dart';
+import 'package:fireout/services/notification_service.dart';
 import 'package:fireout/ui/screens/dashboard/dashboard_screen.dart';
 import 'package:fireout/ui/screens/user/user_dashboard_screen.dart';
 import 'package:fireout/ui/screens/user/report_incident_screen.dart';
@@ -23,6 +24,19 @@ class _RoleBasedMainScreenState extends State<RoleBasedMainScreen> {
   void initState() {
     super.initState();
     _loadUserRole();
+    
+    // Set navigation context for notifications after the frame is built
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        NotificationService.setNavigationContext(context);
+      }
+    });
+  }
+  
+  @override
+  void dispose() {
+    NotificationService.clearNavigationContext();
+    super.dispose();
   }
 
   Future<void> _loadUserRole() async {

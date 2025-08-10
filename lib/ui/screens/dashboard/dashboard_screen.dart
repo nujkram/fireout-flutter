@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:async';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:fireout/services/auth_service.dart';
 import 'package:fireout/services/incident_service.dart';
+import 'package:fireout/services/notification_service.dart';
 import 'package:fireout/ui/screens/dashboard/widgets/incident_card.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -15,12 +17,15 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   final AuthService _authService = AuthService();
   final IncidentService _incidentService = IncidentService();
+  final NotificationService _notificationService = NotificationService();
   List<Map<String, dynamic>> incidents = [];
   bool isLoading = true;
   String? userFullName;
   String? userRole;
   Timer? _refreshTimer;
   bool _isSilentRefreshing = false;
+  // Track which incidents we've already notified about in this session
+  final Set<String> _notifiedIncidentIds = <String>{};
 
   @override
   void initState() {
@@ -55,6 +60,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         incidents = fetchedIncidents;
         isLoading = false;
       });
+      // Trigger local notifications for any newly seen IN-PROGRESS incidents
+      await _notifyNewInProgressIncidents(fetchedIncidents);
     } catch (e) {
       setState(() {
         isLoading = false;
@@ -76,10 +83,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
       setState(() {
         incidents = fetchedIncidents;
       });
+      // Trigger notifications for any new ones detected on refresh
+      await _notifyNewInProgressIncidents(fetchedIncidents);
     } catch (_) {
       // Ignore errors during silent refresh to avoid UI disruption
     } finally {
       _isSilentRefreshing = false;
+    }
+  }
+
+  Future<void> _notifyNewInProgressIncidents(List<Map<String, dynamic>> fetched) async {
+    try {
+      for (final incident in fetched) {
+        final id = (incident['_id'] ?? '').toString();
+        if (id.isEmpty) continue;
+        if (_notifiedIncidentIds.contains(id)) continue;
+        final status = (incident['status'] ?? '').toString();
+        if (status == 'IN-PROGRESS') {
+          final type = (incident['incidentType'] ?? 'General').toString();
+          // Fire a local notification
+          await _notificationService.handleIncidentStatusChange(id, status, type);
+          _notifiedIncidentIds.add(id);
+        }
+      }
+    } catch (e) {
+      // Best-effort; do not surface to UI
+      // ignore: avoid_print
+      print('🚨 Error notifying for new in-progress incidents: $e');
     }
   }
 
@@ -132,6 +162,66 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       },
     );
+  }
+
+  Future<void> _testNotification() async {
+    try {
+      print('🔔 Dashboard: Testing notification...');
+      
+      // Ensure notification service is initialized
+      await _notificationService.initialize();
+      
+      // Show test notification
+      await _notificationService.showTestNotification();
+      
+      print('🔔 Dashboard: Test notification completed successfully');
+      
+      if (mounted) {
+        final message = kIsWeb 
+          ? '🌐 Web test notification sent! (Limited features on web)'
+          : '🔔 Test notification sent! Check your notification panel.';
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              message,
+              style: GoogleFonts.poppins(),
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      print('🚨 Dashboard: Error sending test notification: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '❌ Failed to send test notification',
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  'Error: ${e.toString()}',
+                  style: GoogleFonts.poppins(fontSize: 11),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Check: 1) Volume up, 2) Notification sounds enabled, 3) Not in Do Not Disturb mode',
+                  style: GoogleFonts.poppins(fontSize: 10),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 8),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _performLogout() async {
@@ -221,6 +311,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _refreshIncidents,
+          ),
+          IconButton(
+            icon: const Icon(Icons.notifications, color: Colors.white),
+            onPressed: _testNotification,
           ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white),
