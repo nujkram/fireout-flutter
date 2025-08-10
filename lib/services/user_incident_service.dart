@@ -336,17 +336,6 @@ class UserIncidentService {
         ],
       },
       {
-        '_id': 'user_2',
-        'incidentType': 'Medical Emergency',
-        'description': 'Person collapsed on the street',
-        'latitude': 14.6042,
-        'longitude': 120.9822,
-        'status': 'IN_PROGRESS',
-        'createdAt': DateTime.now().subtract(const Duration(hours: 5)).toIso8601String(),
-        'updatedAt': DateTime.now().subtract(const Duration(minutes: 30)).toIso8601String(),
-        'media': [],
-      },
-      {
         '_id': 'user_3',
         'incidentType': 'Traffic Accident',
         'description': 'Car accident at intersection',

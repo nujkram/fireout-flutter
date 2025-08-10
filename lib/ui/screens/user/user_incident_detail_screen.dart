@@ -44,7 +44,7 @@ class UserIncidentDetailScreen extends StatelessWidget {
           if (latitude != null && longitude != null)
             IconButton(
               icon: const Icon(Icons.directions),
-              onPressed: () => _openDirections(latitude, longitude),
+              onPressed: () => _openDirections(context, latitude, longitude),
             ),
         ],
       ),
@@ -62,7 +62,7 @@ class UserIncidentDetailScreen extends StatelessWidget {
             _buildTimelineCard(createdAt, updatedAt),
             const SizedBox(height: 16),
             if (latitude != null && longitude != null) ...[
-              _buildLocationCard(latitude, longitude),
+              _buildLocationCard(context, latitude, longitude),
               const SizedBox(height: 16),
             ],
             if (mediaFiles.isNotEmpty) ...[
@@ -193,7 +193,7 @@ class UserIncidentDetailScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildLocationCard(double latitude, double longitude) {
+  Widget _buildLocationCard(BuildContext context, double latitude, double longitude) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -227,7 +227,7 @@ class UserIncidentDetailScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           ElevatedButton.icon(
-            onPressed: () => _openDirections(latitude, longitude),
+            onPressed: () => _openDirections(context, latitude, longitude),
             icon: const Icon(Icons.directions),
             label: const Text('Get Directions'),
             style: ElevatedButton.styleFrom(
@@ -673,11 +673,40 @@ class UserIncidentDetailScreen extends StatelessWidget {
     }
   }
 
-  Future<void> _openDirections(double lat, double lng) async {
-    final url = 'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng';
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
+  Future<void> _openDirections(BuildContext context, double lat, double lng) async {
+    // Try multiple methods to ensure compatibility across devices
+    List<String> urls = [
+      'google.navigation:q=$lat,$lng&mode=d', // Google Maps app navigation
+      'geo:$lat,$lng?q=$lat,$lng', // Generic geo intent
+      'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng', // Google Maps web URL
+      'https://maps.google.com/?q=$lat,$lng', // Alternative Google Maps URL
+    ];
+    
+    // Try each URL until one works
+    for (String url in urls) {
+      try {
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+          return; // Success, exit the method
+        }
+      } catch (e) {
+        print('Failed to launch $url: $e');
+        continue; // Try next URL
+      }
+    }
+    
+    // If all methods fail, show error message
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Unable to open directions. Please check if you have a maps app installed.',
+            style: GoogleFonts.poppins(),
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 }

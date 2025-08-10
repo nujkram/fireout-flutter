@@ -13,6 +13,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:hydrated_bloc/hydrated_bloc.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:fireout/ui/screens/auth_wrapper.dart';
 import 'package:fireout/ui/screens/login/login_screen.dart';
 import 'package:fireout/ui/screens/incident/incident_detail_screen.dart';
 import 'package:fireout/ui/screens/role_based_main_screen.dart';
@@ -96,7 +97,7 @@ class MyApp extends StatelessWidget {
           return MaterialApp(
             title: AppConfig.instance.appName,
             theme: state.themeData,
-            home: const LoginScreen(),
+            home: const AuthWrapper(),
             debugShowCheckedModeBanner: AppConfig.instance.debugMode,
             routes: {
               '/login': (context) => const LoginScreen(),

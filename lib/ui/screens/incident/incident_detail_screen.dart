@@ -108,27 +108,86 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
   }
 
   Future<void> _openDirections(double lat, double lng) async {
-    String url;
+    // Try multiple methods to ensure compatibility across devices
+    List<String> urls = [];
     
     if (_currentPosition != null) {
-      // Use current location as starting point
-      url = 'https://www.google.com/maps/dir/${_currentPosition!.latitude},${_currentPosition!.longitude}/$lat,$lng';
+      // Method 1: Google Maps app with current location as starting point
+      urls.add('google.navigation:q=$lat,$lng&mode=d');
+      // Method 2: Generic maps intent
+      urls.add('geo:${_currentPosition!.latitude},${_currentPosition!.longitude}?q=$lat,$lng');
+      // Method 3: Web URL with current location
+      urls.add('https://www.google.com/maps/dir/${_currentPosition!.latitude},${_currentPosition!.longitude}/$lat,$lng');
     } else {
-      // Use device's location services to determine starting point
-      url = 'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng';
+      // Method 1: Google Maps app without starting point
+      urls.add('google.navigation:q=$lat,$lng&mode=d');
+      // Method 2: Generic maps intent
+      urls.add('geo:$lat,$lng?q=$lat,$lng');
+      // Method 3: Web URL without starting point
+      urls.add('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
     }
     
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
+    // Try each URL until one works
+    for (String url in urls) {
+      try {
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+          return; // Success, exit the method
+        }
+      } catch (e) {
+        print('Failed to launch $url: $e');
+        continue; // Try next URL
+      }
+    }
+    
+    // If all methods fail, show error message
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Unable to open directions. Please check if you have a maps app installed.',
+            style: GoogleFonts.poppins(),
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
   Future<void> _openInMaps(double lat, double lng) async {
-    final url = 'https://www.google.com/maps/search/?api=1&query=$lat,$lng';
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
+    // Try multiple methods to ensure compatibility across devices
+    List<String> urls = [
+      'geo:$lat,$lng?q=$lat,$lng', // Generic geo intent
+      'https://maps.google.com/?q=$lat,$lng', // Google Maps web URL
+      'https://www.google.com/maps/search/?api=1&query=$lat,$lng', // Google Maps API URL
+    ];
+    
+    // Try each URL until one works
+    for (String url in urls) {
+      try {
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+          return; // Success, exit the method
+        }
+      } catch (e) {
+        print('Failed to launch $url: $e');
+        continue; // Try next URL
+      }
+    }
+    
+    // If all methods fail, show error message
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Unable to open maps. Please check if you have a maps app installed.',
+            style: GoogleFonts.poppins(),
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
