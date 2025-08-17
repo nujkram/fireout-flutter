@@ -219,6 +219,16 @@ class AuthService {
     }
   }
 
+  Future<String?> getStationId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userDataStr = prefs.getString('user_data');
+    if (userDataStr != null) {
+      final userData = jsonDecode(userDataStr);
+      return userData['stationId'];
+    }
+    return null;
+  }
+
   Future<bool> hasRole(String role) async {
     final userRole = await getUserRole();
     return userRole == role;

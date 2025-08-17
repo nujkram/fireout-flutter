@@ -224,6 +224,7 @@ class NotificationService {
     try {
       final userId = await _authService.getUserId();
       final userRole = await _authService.getUserRole();
+      final stationId = await _authService.getStationId();
       
       if (userId == null || userRole == null) {
         print('🚨 Cannot register FCM token: User not authenticated');
@@ -241,6 +242,7 @@ class NotificationService {
         data: {
           'userId': userId,
           'role': userRole,
+          'stationId': stationId,
           'fcmToken': token,
           'platform': kIsWeb ? 'web' : 'mobile',
         },
@@ -514,6 +516,85 @@ class NotificationService {
       );
       
       await showLocalNotification(message);
+    }
+  }
+
+  // Enhanced method to handle station-based incident notifications with alert levels
+  Future<void> handleStationIncidentNotification({
+    required String incidentId,
+    required String stationId,
+    required String incidentType,
+    required String status,
+    required String alertLevel, // '1st', '2nd', '3rd'
+    String? description,
+    Map<String, double>? location,
+  }) async {
+    try {
+      final userId = await _authService.getUserId();
+      final userRole = await _authService.getUserRole();
+      final userStationId = await _authService.getStationId();
+      
+      if (userId == null || userRole == null) {
+        print('🚨 Cannot send station notification: User not authenticated');
+        return;
+      }
+
+      // Only send notifications to responders (not regular users)
+      if (!['ADMINISTRATOR', 'MANAGER', 'OFFICER'].contains(userRole)) {
+        return;
+      }
+
+      // Check if this user should receive notifications for this incident
+      if (userStationId != stationId) {
+        print('🔔 Skipping notification: User station ($userStationId) != incident station ($stationId)');
+        return;
+      }
+
+      // Create notification based on alert level
+      String title;
+      String body;
+      
+      switch (alertLevel.toLowerCase()) {
+        case '1st':
+          title = '🚨 URGENT: $incidentType - 1st Responder Alert';
+          body = 'Immediate response required at ${description ?? 'incident location'}';
+          break;
+        case '2nd':
+          title = '⚠️ BACKUP: $incidentType - 2nd Responder Alert';
+          body = 'Backup response requested for ongoing incident';
+          break;
+        case '3rd':
+          title = '📢 SUPPORT: $incidentType - 3rd Responder Alert';
+          body = 'Additional support needed for incident escalation';
+          break;
+        default:
+          title = '🔔 Incident Update: $incidentType';
+          body = 'Status: $status';
+      }
+
+      final message = RemoteMessage(
+        messageId: DateTime.now().millisecondsSinceEpoch.toString(),
+        notification: RemoteNotification(
+          title: title,
+          body: body,
+        ),
+        data: {
+          'incidentId': incidentId,
+          'stationId': stationId,
+          'incidentType': incidentType,
+          'status': status,
+          'alertLevel': alertLevel,
+          'description': description ?? '',
+          if (location != null) 'latitude': location['latitude'].toString(),
+          if (location != null) 'longitude': location['longitude'].toString(),
+        },
+      );
+      
+      await showLocalNotification(message);
+      print('🔔 Station-based notification sent for $alertLevel responder alert');
+      
+    } catch (e) {
+      print('🚨 Error sending station incident notification: $e');
     }
   }
 }
