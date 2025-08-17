@@ -164,65 +164,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Future<void> _testNotification() async {
-    try {
-      print('🔔 Dashboard: Testing notification...');
-      
-      // Ensure notification service is initialized
-      await _notificationService.initialize();
-      
-      // Show test notification
-      await _notificationService.showTestNotification();
-      
-      print('🔔 Dashboard: Test notification completed successfully');
-      
-      if (mounted) {
-        final message = kIsWeb 
-          ? '🌐 Web test notification sent! (Limited features on web)'
-          : '🔔 Test notification sent! Check your notification panel.';
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              message,
-              style: GoogleFonts.poppins(),
-            ),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
-    } catch (e) {
-      print('🚨 Dashboard: Error sending test notification: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '❌ Failed to send test notification',
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  'Error: ${e.toString()}',
-                  style: GoogleFonts.poppins(fontSize: 11),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Check: 1) Volume up, 2) Notification sounds enabled, 3) Not in Do Not Disturb mode',
-                  style: GoogleFonts.poppins(fontSize: 10),
-                ),
-              ],
-            ),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 8),
-          ),
-        );
-      }
-    }
-  }
 
   Future<void> _performLogout() async {
     try {
@@ -311,10 +252,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _refreshIncidents,
-          ),
-          IconButton(
-            icon: const Icon(Icons.notifications, color: Colors.white),
-            onPressed: _testNotification,
           ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white),

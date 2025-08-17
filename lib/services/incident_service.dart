@@ -4,6 +4,7 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:fireout/config/app_config.dart';
 import 'package:fireout/services/auth_service.dart';
 import 'package:fireout/services/notification_service.dart';
+import 'package:fireout/services/websocket_service.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:convert';
 
@@ -21,6 +22,7 @@ class IncidentService {
   
   final AuthService _authService = AuthService();
   NotificationService? _notificationService;
+  WebSocketService? _webSocketService;
   String get baseUrl => AppConfig.instance.baseUrl;
 
   void _setupDio() {
@@ -164,6 +166,9 @@ class IncidentService {
         } catch (e) {
           print('🚨 Error sending notification to backend: $e');
         }
+        
+        // Ensure WebSocket is connected for future real-time updates
+        await _ensureWebSocketConnected();
       }
 
       return success;
@@ -352,6 +357,26 @@ class IncidentService {
       // Return mock user data based on the structure you provided
       return _getMockUserById(userId);
     }
+  }
+
+  // Method to ensure WebSocket is connected (called after status updates)
+  Future<void> _ensureWebSocketConnected() async {
+    try {
+      _webSocketService ??= WebSocketService();
+      if (!_webSocketService!.isConnected) {
+        print('🔌 WebSocket not connected, attempting to reconnect...');
+        await _webSocketService!.reconnect();
+      }
+    } catch (e) {
+      print('🚨 Error ensuring WebSocket connection: $e');
+    }
+  }
+
+  // Method to handle real-time incident updates from WebSocket
+  void handleWebSocketIncidentUpdate(Map<String, dynamic> data) {
+    print('📊 Handling WebSocket incident update: $data');
+    // This method can be used to update local cache or trigger UI updates
+    // For now, it just logs the update - you can extend this as needed
   }
 
   Map<String, dynamic>? _getMockUserById(String userId) {

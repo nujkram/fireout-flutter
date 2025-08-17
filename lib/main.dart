@@ -9,10 +9,13 @@ import 'package:fireout/cubit/bottom_nav_cubit.dart';
 import 'package:fireout/cubit/theme_cubit.dart';
 import 'package:fireout/services/auth_service.dart';
 import 'package:fireout/services/notification_service.dart';
+import 'package:fireout/services/websocket_service.dart';
+import 'package:fireout/services/native_permissions.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'dart:typed_data';
 import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 import 'package:hydrated_bloc/hydrated_bloc.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:fireout/ui/screens/auth_wrapper.dart';
@@ -33,7 +36,9 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // Ensure plugins are ready in background isolate
   WidgetsFlutterBinding.ensureInitialized();
   try {
-    await Firebase.initializeApp();
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
   } catch (_) {}
 
   print('🔔 Background message received: ${message.messageId}');
@@ -134,13 +139,17 @@ void main() async {
   // Initialize Firebase BEFORE any Firebase Messaging usage
   bool firebaseReady = false;
   try {
-    await Firebase.initializeApp();
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
     firebaseReady = true;
+    print('✅ Firebase initialized successfully');
   } catch (e) {
     // On web, Firebase initialization requires options configured via FlutterFire.
     // If not configured, skip notifications setup gracefully.
     // ignore: avoid_print
     print('🚨 Firebase initialization failed or not configured for this platform: $e');
+    // Don't crash the app, just continue without Firebase features
   }
 
   // Initialize auth service
@@ -150,10 +159,34 @@ void main() async {
   
   // Initialize notification service (only if Firebase is ready)
   if (firebaseReady) {
-    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-    final notificationService = NotificationService();
-    await notificationService.initialize();
+    try {
+      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+      final notificationService = NotificationService();
+      await notificationService.initialize();
+      print('✅ Notification service initialized successfully');
+      
+      // Initialize WebSocket service for real-time updates
+      try {
+        final webSocketService = WebSocketService();
+        webSocketService.setNotificationService(notificationService);
+        await webSocketService.connect();
+        print('✅ WebSocket service initialized successfully');
+      } catch (e) {
+        print('🚨 WebSocket service initialization failed: $e');
+        // Don't crash the app, WebSocket is not critical for basic functionality
+      }
+    } catch (e) {
+      print('🚨 Notification service initialization failed: $e');
+      // Don't crash the app, continue without notifications
+    }
   }
+
+  // Start Android reminder service to help users enable permissions if blocked
+  try {
+    if (!kIsWeb && Platform.isAndroid) {
+      await NativePermissions.startPermissionReminderService();
+    }
+  } catch (_) {}
   
   HydratedBloc.storage = await HydratedStorage.build(
     storageDirectory: kIsWeb

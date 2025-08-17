@@ -114,7 +114,7 @@ class NotificationService {
         importance: Importance.max, // Max importance for sound
         playSound: true,
         enableVibration: true,
-        sound: RawResourceAndroidNotificationSound('test_notification'), // Add sound to channel
+        sound: RawResourceAndroidNotificationSound('general_alert'), // Add sound to channel
       );
 
       // Fire emergency channel
@@ -295,10 +295,10 @@ class NotificationService {
     print('🔔 Message data: ${message.data}');
     // Always show a local notification in foreground, even for data-only messages
     // This ensures dashboard-triggered pushes (often data-only) still alert the user
-    await _showLocalNotification(message);
+    await showLocalNotification(message);
   }
 
-  Future<void> _showLocalNotification(RemoteMessage message) async {
+  Future<void> showLocalNotification(RemoteMessage message) async {
     // Determine incident type and channel
     final incidentType = message.data['incidentType']?.toString().toLowerCase() ?? 'general';
     final channelConfig = _getChannelConfigForIncidentType(incidentType);
@@ -492,114 +492,6 @@ class NotificationService {
     _navigationContext = null;
   }
   
-  // Method to show test notification for debugging
-  Future<void> showTestNotification() async {
-    print('🔔 Starting test notification...');
-    
-    try {
-      // Ensure the notification service is initialized
-      if (!_isInitialized) {
-        print('🔔 Notification service not initialized, initializing now...');
-        await initialize();
-      }
-
-      print('🔔 Creating notification details...');
-      
-      // Create vibration pattern safely for non-web platforms
-      Int64List? vibrationPattern;
-      if (!kIsWeb) {
-        try {
-          vibrationPattern = Int64List.fromList([0, 300, 200, 300]);
-        } catch (e) {
-          print('🚨 Could not create vibration pattern: $e');
-        }
-      }
-      
-      // Debug: Check if sound resource exists
-      print('🔔 Attempting to use sound: test_notification');
-      
-      final androidDetails = AndroidNotificationDetails(
-        'incident_updates',
-        'Test Notification',
-        channelDescription: 'Test notification with custom sound',
-        importance: Importance.max, // Changed to max for sound
-        priority: Priority.max, // Changed to max for sound
-        showWhen: true,
-        icon: '@mipmap/ic_launcher',
-        sound: kIsWeb ? null : const RawResourceAndroidNotificationSound('test_notification'),
-        enableVibration: !kIsWeb,
-        vibrationPattern: vibrationPattern,
-        playSound: true,
-        onlyAlertOnce: false,
-        autoCancel: false, // Keep notification visible
-        ongoing: false, // Allow dismissal
-        silent: false, // Explicitly not silent
-        visibility: NotificationVisibility.public, // Public visibility
-        channelAction: AndroidNotificationChannelAction.update, // Force channel update
-      );
-
-      const iosDetails = DarwinNotificationDetails(
-        presentAlert: true,
-        presentBadge: true,
-        presentSound: true,
-        sound: 'test_notification.mp3',
-        interruptionLevel: InterruptionLevel.active,
-      );
-
-      final notificationDetails = NotificationDetails(
-        android: androidDetails,
-        iOS: iosDetails,
-      );
-
-      print('🔔 Showing notification...');
-      
-      try {
-        await _localNotifications.show(
-          999,
-          '🔔 Test Notification',
-          'This is a test notification with custom alert sound!',
-          notificationDetails,
-        );
-        print('🔔 Test notification sent successfully');
-      } catch (e) {
-        if (e.toString().contains('invalid_sound')) {
-          print('🚨 Custom sound failed, trying without sound: $e');
-          
-          // Fallback notification without custom sound
-          final fallbackAndroidDetails = AndroidNotificationDetails(
-            'incident_updates',
-            'Test Notification',
-            channelDescription: 'Test notification (fallback)',
-            importance: Importance.high,
-            priority: Priority.high,
-            showWhen: true,
-            icon: '@mipmap/ic_launcher',
-            enableVibration: !kIsWeb,
-            vibrationPattern: vibrationPattern,
-          );
-          
-          final fallbackNotificationDetails = NotificationDetails(
-            android: fallbackAndroidDetails,
-            iOS: iosDetails,
-          );
-          
-          await _localNotifications.show(
-            999,
-            '🔔 Test Notification',
-            'This is a test notification (using system default sound)!',
-            fallbackNotificationDetails,
-          );
-          print('🔔 Test notification sent successfully (fallback mode)');
-        } else {
-          rethrow; // Re-throw other errors
-        }
-      }
-    } catch (e) {
-      print('🚨 Error in showTestNotification: $e');
-      print('🚨 Stack trace: ${StackTrace.current}');
-      rethrow; // Re-throw so dashboard can show proper error
-    }
-  }
   
   // Method to handle incident status change (called from incident service)
   Future<void> handleIncidentStatusChange(String incidentId, String newStatus, String incidentType) async {
@@ -621,7 +513,7 @@ class NotificationService {
         },
       );
       
-      await _showLocalNotification(message);
+      await showLocalNotification(message);
     }
   }
 }
