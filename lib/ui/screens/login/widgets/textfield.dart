@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:fireout/constant/colors.dart';
 
@@ -11,7 +12,8 @@ class CustomTextField extends StatelessWidget {
       this.obscureText = false,
       required this.controller,
       this.onFocusChange,
-      this.onChange})
+      this.onChange,
+      this.inputFormatters})
       : super(key: key);
   final String label;
   final bool isVisible;
@@ -20,6 +22,7 @@ class CustomTextField extends StatelessWidget {
   final TextEditingController controller;
   final Function(bool)? onFocusChange;
   final Function(String)? onChange;
+  final List<TextInputFormatter>? inputFormatters;
 
   @override
   Widget build(BuildContext context) {
@@ -48,6 +51,7 @@ class CustomTextField extends StatelessWidget {
                   keyboardType: inputType,
                   controller: controller,
                   obscureText: obscureText,
+                  inputFormatters: inputFormatters,
                   style: const TextStyle(color: Colors.white),
                   cursorColor: Colors.white,
                   textAlignVertical: TextAlignVertical.center,

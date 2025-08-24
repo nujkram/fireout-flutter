@@ -25,7 +25,7 @@ class AppConfig {
   static void initialize() {
     // Get flavor from build configuration
     // For release builds, this should be set by the build system
-    const String flavor = String.fromEnvironment('FLAVOR', defaultValue: 'production');
+    const String flavor = String.fromEnvironment('FLAVOR', defaultValue: 'development');
     
     print('🔧 App Config - Flavor from environment: $flavor');
     

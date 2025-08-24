@@ -246,4 +246,218 @@ class AuthService {
         return '/user-dashboard';
     }
   }
+
+  Future<Map<String, dynamic>?> signupWithPhone(String phoneNumber, String firstName, String lastName) async {
+    try {
+      print('🔍 Phone signup attempt - URL: $baseUrl/api/auth/signup-phone');
+      print('🔍 Phone: $phoneNumber, Name: $firstName $lastName');
+      
+      // Try the format that matches Svelte frontend
+      final requestData = {
+        'phone': phoneNumber,
+        'firstName': firstName,
+        'lastName': lastName,
+      };
+      
+      print('🔍 Request data: $requestData');
+      
+      final response = await _dio.post(
+        '$baseUrl/api/auth/signup-phone',
+        data: requestData,
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        ),
+      );
+      
+      print('✅ Response status: ${response.statusCode}');
+      print('✅ Response data: ${response.data}');
+      
+      if (response.statusCode == 200) {
+        final data = response.data is String 
+            ? jsonDecode(response.data) 
+            : response.data;
+        
+        if (data['error'] == false) {
+          return data;
+        } else {
+          print('❌ Signup failed - error in response');
+          return null;
+        }
+      }
+      print('❌ Unexpected status code: ${response.statusCode}');
+      return null;
+    } catch (e) {
+      print('🚨 Exception during phone signup: $e');
+      if (e is DioException) {
+        print('🚨 Dio error type: ${e.type}');
+        print('🚨 Dio message: ${e.message}');
+        print('🚨 Response data: ${e.response?.data}');
+        print('🚨 Status code: ${e.response?.statusCode}');
+      }
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> verifyOTP(String phoneNumber, String otp) async {
+    try {
+      print('🔍 OTP verification attempt - URL: $baseUrl/api/auth/verify-otp');
+      print('🔍 Phone: $phoneNumber, OTP: $otp');
+      
+      final response = await _dio.post(
+        '$baseUrl/api/auth/verify-otp',
+        data: {
+          'phoneNumber': phoneNumber,
+          'otp': otp,
+        },
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        ),
+      );
+      
+      print('✅ Response status: ${response.statusCode}');
+      print('✅ Response data: ${response.data}');
+      
+      if (response.statusCode == 200) {
+        final data = response.data is String 
+            ? jsonDecode(response.data) 
+            : response.data;
+        
+        if (data['error'] == false) {
+          // Store user data for session management
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('user_data', jsonEncode(data['user']));
+          await prefs.setString('user_role', data['user']['role'] ?? 'USER');
+          
+          // Store the JWT token if provided
+          if (data['token'] != null) {
+            _authToken = data['token'];
+            await prefs.setString('auth_token', _authToken!);
+            _dio.options.headers['Authorization'] = 'Bearer $_authToken';
+            print('✅ JWT token stored: ${_authToken?.substring(0, 20)}...');
+          } else {
+            _authToken = 'logged_in';
+            await prefs.setString('auth_token', _authToken!);
+            print('⚠️ No JWT token in response, using simple auth flag');
+          }
+          
+          return data;
+        } else {
+          print('❌ OTP verification failed - error in response');
+          return null;
+        }
+      }
+      print('❌ Unexpected status code: ${response.statusCode}');
+      return null;
+    } catch (e) {
+      print('🚨 Exception during OTP verification: $e');
+      if (e is DioException) {
+        print('🚨 Dio error type: ${e.type}');
+        print('🚨 Dio message: ${e.message}');
+        print('🚨 Response data: ${e.response?.data}');
+        print('🚨 Status code: ${e.response?.statusCode}');
+      }
+      return null;
+    }
+  }
+
+  Future<bool> resendOTP(String phoneNumber) async {
+    try {
+      print('🔍 Resend OTP attempt - URL: $baseUrl/api/auth/resend-otp');
+      print('🔍 Phone: $phoneNumber');
+      
+      final response = await _dio.post(
+        '$baseUrl/api/auth/resend-otp',
+        data: {
+          'phoneNumber': phoneNumber,
+        },
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        ),
+      );
+      
+      print('✅ Response status: ${response.statusCode}');
+      print('✅ Response data: ${response.data}');
+      
+      if (response.statusCode == 200) {
+        final data = response.data is String 
+            ? jsonDecode(response.data) 
+            : response.data;
+        
+        return data['error'] == false;
+      }
+      return false;
+    } catch (e) {
+      print('🚨 Exception during resend OTP: $e');
+      return false;
+    }
+  }
+
+  Future<String?> getSignupErrorMessage(String phoneNumber, String firstName, String lastName) async {
+    try {
+      final response = await _dio.post(
+        '$baseUrl/api/auth/signup-phone',
+        data: {
+          'phone': phoneNumber,
+          'firstName': firstName,
+          'lastName': lastName,
+        },
+      );
+      
+      if (response.statusCode == 200) {
+        final data = response.data is String 
+            ? jsonDecode(response.data) 
+            : response.data;
+        if (data['error'] == true) {
+          return data['errorMessage'] ?? 'Signup failed';
+        }
+      }
+      return null;
+    } catch (e) {
+      if (e is DioException) {
+        final responseData = e.response?.data;
+        if (responseData != null && responseData['errorMessage'] != null) {
+          return responseData['errorMessage'];
+        }
+        return 'Network error';
+      }
+      return 'An error occurred';
+    }
+  }
+
+  Future<String?> getVerificationErrorMessage(String phoneNumber, String otp) async {
+    try {
+      final response = await _dio.post(
+        '$baseUrl/api/auth/verify-otp',
+        data: {
+          'phoneNumber': phoneNumber,
+          'otp': otp,
+        },
+      );
+      
+      if (response.statusCode == 200) {
+        final data = response.data is String 
+            ? jsonDecode(response.data) 
+            : response.data;
+        if (data['error'] == true) {
+          return data['errorMessage'] ?? 'Verification failed';
+        }
+      }
+      return null;
+    } catch (e) {
+      if (e is DioException) {
+        final responseData = e.response?.data;
+        if (responseData != null && responseData['errorMessage'] != null) {
+          return responseData['errorMessage'];
+        }
+        return 'Network error';
+      }
+      return 'An error occurred';
+    }
+  }
 }

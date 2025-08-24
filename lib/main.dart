@@ -30,6 +30,8 @@ import 'package:fireout/ui/screens/dashboard/dashboard_screen.dart';
 import 'package:fireout/ui/screens/profile/profile_screen.dart';
 import 'package:fireout/ui/widgets/role_guard_route.dart';
 import 'package:fireout/user_dashboard.dart';
+import 'package:fireout/ui/screens/auth/phone_signup_screen.dart';
+import 'package:fireout/ui/screens/auth/otp_verification_screen.dart';
 
 // Background message handler (must be top-level function)
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -220,6 +222,8 @@ class MyApp extends StatelessWidget {
             debugShowCheckedModeBanner: AppConfig.instance.debugMode,
             routes: {
               '/login': (context) => const LoginScreen(),
+              '/phone-signup': (context) => const PhoneSignupScreen(),
+              '/otp-verification': (context) => const OTPVerificationScreen(),
               
               // Role-based main routes
               '/main': (context) => const RoleBasedMainScreen(),

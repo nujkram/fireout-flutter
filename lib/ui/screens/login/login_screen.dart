@@ -82,6 +82,16 @@ class _LoginScreenState extends State<LoginScreen> {
                         : const Text('Login'),
                     ),
                   ),
+                  const SizedBox(height: 20),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pushNamed(context, '/phone-signup');
+                    },
+                    child: const Text(
+                      'Don\'t have an account? Sign up',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
                 ],
               ),
             )
