@@ -98,7 +98,7 @@ class AppThemes {
         color: textSwatch.shade500,
       ),
     ),
-    bottomAppBarTheme: const BottomAppBarTheme(color: Colors.white),
+    bottomAppBarTheme: const BottomAppBarThemeData(color: Colors.white),
     colorScheme: ColorScheme.fromSwatch(primarySwatch: primarySwatch)
         .copyWith(background: textSwatch.shade100),
   );
@@ -155,6 +155,6 @@ class AppThemes {
         color: textSwatch.shade400,
       ),
     ),
-    bottomAppBarTheme: const BottomAppBarTheme(color: Color(0xFF35353a)),
+    bottomAppBarTheme: const BottomAppBarThemeData(color: Color(0xFF35353a)),
   );
 }

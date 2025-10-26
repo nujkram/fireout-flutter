@@ -7,7 +7,9 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart' as permission_handler;
 import 'package:fireout/services/auth_service.dart';
 import 'package:fireout/services/incident_service.dart';
+import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
+import 'dart:io';
 
 class IncidentDetailScreen extends StatefulWidget {
   final Map<String, dynamic> incident;
@@ -29,6 +31,12 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
   bool _isLoadingReporter = false;
   final AuthService _authService = AuthService();
   final IncidentService _incidentService = IncidentService();
+
+  // Resolution state
+  final List<XFile> _resolutionImages = [];
+  final ImagePicker _imagePicker = ImagePicker();
+  bool _isResolvingIncident = false;
+  final TextEditingController _resolutionNotesController = TextEditingController();
 
   @override
   void initState() {
@@ -694,50 +702,19 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                             width: double.infinity,
                             child: ElevatedButton.icon(
                               onPressed: () => _showStatusUpdateDialog(),
-                              icon: const Icon(Icons.update),
+                              icon: const Icon(Icons.check_circle),
                               label: Text(
-                                'Update Status',
+                                'Mark as Completed',
                                 style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
                               ),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.orange,
+                                backgroundColor: Colors.green,
                                 foregroundColor: Colors.white,
                                 padding: const EdgeInsets.symmetric(vertical: 12),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                               ),
-                            ),
-                          ),
-                        
-                        // Show info message for officers who cannot update status
-                        if (widget.incident['status'] == 'IN-PROGRESS' && !_canUpdateStatus() && _userRole == 'OFFICER')
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.blue.withOpacity(0.3)),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.info_outline,
-                                  color: Colors.blue,
-                                  size: 20,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    'Only Administrators and Managers can update incident status',
-                                    style: GoogleFonts.poppins(
-                                      color: Colors.blue,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                              ],
                             ),
                           ),
                       ],
@@ -1054,41 +1031,244 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
   }
 
   bool _canUpdateStatus() {
-    return _userRole == 'ADMINISTRATOR' || _userRole == 'MANAGER';
+    return _userRole == 'ADMINISTRATOR' || _userRole == 'MANAGER' || _userRole == 'OFFICER';
   }
 
   void _showStatusUpdateDialog() {
+    _resolutionImages.clear();
+    _resolutionNotesController.clear();
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Update Incident Status',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
-        ),
-        content: Text(
-          'Are you sure you want to mark this incident as resolved?',
-          style: GoogleFonts.poppins(),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Cancel',
-              style: GoogleFonts.poppins(),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.check_circle_outline, color: Colors.green),
+              const SizedBox(width: 8),
+              Text(
+                'Complete Incident',
+                style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Add resolution details and photos:',
+                    style: GoogleFonts.poppins(fontSize: 14),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Resolution Notes
+                  TextField(
+                    controller: _resolutionNotesController,
+                    maxLines: 3,
+                    decoration: InputDecoration(
+                      labelText: 'Resolution Notes',
+                      hintText: 'Describe how the incident was resolved...',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      labelStyle: GoogleFonts.poppins(),
+                      hintStyle: GoogleFonts.poppins(fontSize: 12),
+                    ),
+                    style: GoogleFonts.poppins(),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Image Capture Section
+                  Text(
+                    'Resolution Photos (Optional)',
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Image Picker Buttons
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _resolutionImages.length >= 5
+                              ? null
+                              : () async {
+                                  await _pickResolutionImage(ImageSource.camera);
+                                  setState(() {});
+                                },
+                          icon: const Icon(Icons.camera_alt, size: 20),
+                          label: Text(
+                            'Camera',
+                            style: GoogleFonts.poppins(fontSize: 12),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _resolutionImages.length >= 5
+                              ? null
+                              : () async {
+                                  await _pickResolutionImage(ImageSource.gallery);
+                                  setState(() {});
+                                },
+                          icon: const Icon(Icons.photo_library, size: 20),
+                          label: Text(
+                            'Gallery',
+                            style: GoogleFonts.poppins(fontSize: 12),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  if (_resolutionImages.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      '${_resolutionImages.length}/5 photos',
+                      style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Image Preview Grid
+                    SizedBox(
+                      height: 120,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _resolutionImages.length,
+                        itemBuilder: (context, index) {
+                          return _buildImagePreviewItem(
+                            _resolutionImages[index],
+                            index,
+                            setState,
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await _updateIncidentStatus();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
+          actions: [
+            TextButton(
+              onPressed: () {
+                _resolutionImages.clear();
+                _resolutionNotesController.clear();
+                Navigator.pop(context);
+              },
+              child: Text(
+                'Cancel',
+                style: GoogleFonts.poppins(),
+              ),
             ),
-            child: Text(
-              'Mark as Resolved',
-              style: GoogleFonts.poppins(),
+            ElevatedButton.icon(
+              onPressed: _isResolvingIncident
+                  ? null
+                  : () async {
+                      if (_resolutionNotesController.text.trim().isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Please add resolution notes',
+                              style: GoogleFonts.poppins(),
+                            ),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                        return;
+                      }
+
+                      Navigator.pop(context);
+                      await _updateIncidentStatus();
+                    },
+              icon: _isResolvingIncident
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Icon(Icons.check),
+              label: Text(
+                _isResolvingIncident ? 'Completing...' : 'Complete Incident',
+                style: GoogleFonts.poppins(),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImagePreviewItem(XFile image, int index, StateSetter setState) {
+    return Container(
+      width: 100,
+      height: 100,
+      margin: const EdgeInsets.only(right: 8),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Stack(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: kIsWeb
+                ? Image.network(
+                    image.path,
+                    width: 100,
+                    height: 100,
+                    fit: BoxFit.cover,
+                  )
+                : Image.file(
+                    File(image.path),
+                    width: 100,
+                    height: 100,
+                    fit: BoxFit.cover,
+                  ),
+          ),
+          Positioned(
+            top: 4,
+            right: 4,
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _resolutionImages.removeAt(index);
+                });
+              },
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.close,
+                  color: Colors.white,
+                  size: 16,
+                ),
+              ),
             ),
           ),
         ],
@@ -1096,31 +1276,161 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     );
   }
 
-  Future<void> _updateIncidentStatus() async {
+  Future<void> _pickResolutionImage(ImageSource source) async {
     try {
-      // You can implement the actual API call here
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Incident status updated to RESOLVED',
-            style: GoogleFonts.poppins(),
-          ),
-          backgroundColor: Colors.green,
-        ),
+      // Request camera permission if using camera
+      if (source == ImageSource.camera) {
+        final status = await permission_handler.Permission.camera.request();
+        if (status != permission_handler.PermissionStatus.granted) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Camera permission is required',
+                  style: GoogleFonts.poppins(),
+                ),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          return;
+        }
+      }
+
+      final XFile? image = await _imagePicker.pickImage(
+        source: source,
+        imageQuality: 80,
+        maxWidth: 1024,
+        maxHeight: 1024,
       );
-      
-      // Optionally refresh the incident data or navigate back
-      Navigator.pop(context);
+
+      if (image != null) {
+        if (_resolutionImages.length < 5) {
+          _resolutionImages.add(image);
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Maximum 5 photos allowed',
+                  style: GoogleFonts.poppins(),
+                ),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        }
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Failed to update status: $e',
-            style: GoogleFonts.poppins(),
+      print('Error picking image: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Failed to pick image: $e',
+              style: GoogleFonts.poppins(),
+            ),
+            backgroundColor: Colors.red,
           ),
-          backgroundColor: Colors.red,
-        ),
-      );
+        );
+      }
     }
+  }
+
+  Future<void> _updateIncidentStatus() async {
+    setState(() {
+      _isResolvingIncident = true;
+    });
+
+    try {
+      // Convert images to base64
+      List<Map<String, dynamic>> resolutionImageData = [];
+      for (var image in _resolutionImages) {
+        try {
+          final bytes = await image.readAsBytes();
+          final base64Image = base64Encode(bytes);
+          final fileName = image.name;
+          final fileSize = bytes.length;
+
+          resolutionImageData.add({
+            'name': fileName,
+            'type': _getContentType(fileName),
+            'dataBase64': base64Image,
+            'size': fileSize,
+          });
+        } catch (e) {
+          print('Error encoding image: $e');
+        }
+      }
+
+      final incidentId = widget.incident['_id'];
+      if (incidentId == null) {
+        throw Exception('Incident ID not found');
+      }
+
+      // Call the incident service to resolve the incident
+      final success = await _incidentService.resolveIncident(
+        incidentId,
+        resolutionNotes: _resolutionNotesController.text.trim(),
+        resolutionImages: resolutionImageData,
+      );
+
+      if (mounted) {
+        if (success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Incident marked as completed successfully',
+                style: GoogleFonts.poppins(),
+              ),
+              backgroundColor: Colors.green,
+            ),
+          );
+
+          // Navigate back to dashboard
+          Navigator.pop(context);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Failed to update incident status',
+                style: GoogleFonts.poppins(),
+              ),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('Error updating incident status: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Failed to update status: $e',
+              style: GoogleFonts.poppins(),
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isResolvingIncident = false;
+        });
+      }
+      _resolutionImages.clear();
+      _resolutionNotesController.clear();
+    }
+  }
+
+  String _getContentType(String fileName) {
+    final lower = fileName.toLowerCase();
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    return 'application/octet-stream';
   }
 }

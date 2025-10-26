@@ -393,4 +393,67 @@ class IncidentService {
       'isActive': true,
     };
   }
+
+  Future<bool> resolveIncident(
+    String incidentId, {
+    required String resolutionNotes,
+    List<Map<String, dynamic>>? resolutionImages,
+  }) async {
+    try {
+      final userId = await _authService.getUserId();
+      final userRole = await _authService.getUserRole();
+
+      print('🔄 Resolving incident $incidentId with ${resolutionImages?.length ?? 0} images');
+
+      final response = await _dio.put(
+        '$baseUrl/api/admin/incident/$incidentId/complete',
+        data: jsonEncode({
+          'status': 'COMPLETED',
+          'resolutionNotes': resolutionNotes,
+          'resolvedBy': userId,
+          'resolvedByRole': userRole,
+          'resolvedAt': DateTime.now().toIso8601String(),
+          if (resolutionImages != null && resolutionImages.isNotEmpty)
+            'resolutionImages': resolutionImages,
+        }),
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            if (_authService.authToken != null)
+              'Authorization': 'Bearer ${_authService.authToken}',
+            if (userId != null)
+              'X-User-ID': userId,
+          },
+        ),
+      );
+
+      final success = response.statusCode == 200;
+
+      if (success) {
+        print('✅ Incident resolved successfully');
+
+        // Trigger notification for completed status
+        try {
+          _notificationService ??= NotificationService();
+          await _notificationService!.handleIncidentStatusChange(
+            incidentId,
+            'COMPLETED',
+            'Incident'
+          );
+        } catch (e) {
+          print('🚨 Error triggering notification: $e');
+        }
+      }
+
+      return success;
+    } catch (e) {
+      print('🚨 Error resolving incident: $e');
+      if (e is DioException) {
+        print('🚨 Dio error type: ${e.type}');
+        print('🚨 Dio message: ${e.message}');
+        print('🚨 Response data: ${e.response?.data}');
+      }
+      return false;
+    }
+  }
 }
