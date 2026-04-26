@@ -149,22 +149,34 @@ class NotificationService {
         enableVibration: true,
         sound: RawResourceAndroidNotificationSound('accident_alert'),
       );
-        
+
+      // Completed/review channel — uses Android's system default sound
+      const completedChannel = AndroidNotificationChannel(
+        'incident_completed',
+        'Incident Completed',
+        description: 'Notifications for completed or pending-review incidents',
+        importance: Importance.defaultImportance,
+        playSound: true,
+        enableVibration: true,
+      );
+
         // Delete existing channels first to force recreation with sound
         try {
           await androidPlugin?.deleteNotificationChannel('incident_updates');
           await androidPlugin?.deleteNotificationChannel('fire_incidents');
           await androidPlugin?.deleteNotificationChannel('medical_incidents');
           await androidPlugin?.deleteNotificationChannel('accident_incidents');
+          await androidPlugin?.deleteNotificationChannel('incident_completed');
         } catch (e) {
           print('🔔 Old channels not found (expected): $e');
         }
-        
+
         // Create channels with sound
         await androidPlugin?.createNotificationChannel(generalChannel);
         await androidPlugin?.createNotificationChannel(fireChannel);
         await androidPlugin?.createNotificationChannel(medicalChannel);
         await androidPlugin?.createNotificationChannel(accidentChannel);
+        await androidPlugin?.createNotificationChannel(completedChannel);
         
         print('🔔 Android notification channels created successfully');
       } catch (e) {
@@ -301,9 +313,14 @@ class NotificationService {
   }
 
   Future<void> showLocalNotification(RemoteMessage message) async {
-    // Determine incident type and channel
+    // Determine channel — completed/review statuses get the gentler default sound
+    // regardless of incident type.
+    final status = message.data['status']?.toString().toUpperCase() ?? '';
+    final isResolved = status == 'COMPLETED' || status == 'FOR_REVIEW';
     final incidentType = message.data['incidentType']?.toString().toLowerCase() ?? 'general';
-    final channelConfig = _getChannelConfigForIncidentType(incidentType);
+    final channelConfig = isResolved
+        ? _getCompletedChannelConfig()
+        : _getChannelConfigForIncidentType(incidentType);
     
     final androidDetails = AndroidNotificationDetails(
       channelConfig['channelId'],
@@ -359,6 +376,24 @@ class NotificationService {
     if (incidentId != null && incidentId.isNotEmpty) {
       _navigateToIncidentDetail(incidentId);
     }
+  }
+
+  // Channel config for completed / for-review statuses — system default sound,
+  // softer importance, light vibration.
+  Map<String, dynamic> _getCompletedChannelConfig() {
+    final vibration = kIsWeb ? null : Int64List.fromList([0, 200, 100, 200]);
+    return {
+      'channelId': 'incident_completed',
+      'channelName': 'Incident Completed',
+      'description': 'Notifications for completed or pending-review incidents',
+      'importance': Importance.defaultImportance,
+      'priority': Priority.defaultPriority,
+      'sound': null, // Android falls back to the system default notification sound
+      'iosSound': null, // iOS uses the default presentSound
+      'vibration': vibration,
+      'fullScreen': false,
+      'interruptionLevel': InterruptionLevel.active,
+    };
   }
 
   // Helper method to get channel configuration based on incident type

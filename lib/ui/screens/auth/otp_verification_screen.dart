@@ -306,7 +306,7 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
                     ),
                     textAlign: TextAlign.center,
                   ),
-                  if (_expiresAt != null) ...[
+                  if (_expiresAt != null && !_otpConfirmed) ...[
                     const SizedBox(height: 12),
                     Text(
                       _isOtpExpired
@@ -429,19 +429,19 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  if (canResend)
-                    TextButton(
-                      onPressed: isLoading ? null : _handleResendOTP,
-                      child: const Text(
-                        'Resend OTP',
-                        style: TextStyle(color: Colors.white70),
-                      ),
-                    )
-                  else
-                    Text(
-                      'Resend OTP in $_countdown seconds',
-                      style: const TextStyle(color: Colors.white54),
-                    ),
+                  if (!_otpConfirmed)
+                    canResend
+                        ? TextButton(
+                            onPressed: isLoading ? null : _handleResendOTP,
+                            child: const Text(
+                              'Resend OTP',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          )
+                        : Text(
+                            'Resend OTP in $_countdown seconds',
+                            style: const TextStyle(color: Colors.white54),
+                          ),
                 ],
               ),
             ),

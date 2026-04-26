@@ -5,8 +5,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:fireout/services/auth_service.dart';
 import 'package:fireout/services/incident_service.dart';
 import 'package:fireout/services/notification_service.dart';
+import 'package:fireout/services/station_service.dart';
 import 'package:fireout/ui/screens/dashboard/widgets/incident_card.dart';
 import 'package:fireout/ui/screens/dashboard/widgets/pending_confirmation_card.dart';
+import 'package:fireout/utils/geolocation_utils.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -19,12 +21,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final AuthService _authService = AuthService();
   final IncidentService _incidentService = IncidentService();
   final NotificationService _notificationService = NotificationService();
+  final StationService _stationService = StationService();
   List<Map<String, dynamic>> incidents = [];
   List<Map<String, dynamic>> pendingIncidents = [];
   bool isLoading = true;
   bool isPendingLoading = false;
   String? userFullName;
   String? userRole;
+  Map<String, dynamic>? _userStation;
   Timer? _refreshTimer;
   bool _isSilentRefreshing = false;
   int _selectedTab = 0; // 0 = In-Progress, 1 = Pending Confirmation
@@ -59,6 +63,50 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _loadPendingIncidents();
       }
     }
+    await _loadUserStation();
+  }
+
+  Future<void> _loadUserStation() async {
+    try {
+      final stationId = await _authService.getStationId();
+      if (stationId == null || stationId.isEmpty) return;
+      final station = await _stationService.getStationById(stationId);
+      if (!mounted) return;
+      setState(() {
+        _userStation = station;
+        // Re-apply filter to anything already fetched
+        if (incidents.isNotEmpty) {
+          incidents = _applyProximityFilter(incidents);
+        }
+      });
+    } catch (e) {
+      print('Error loading user station: $e');
+    }
+  }
+
+  List<Map<String, dynamic>> _applyProximityFilter(
+    List<Map<String, dynamic>> rawIncidents,
+  ) {
+    // Administrators see every incident.
+    if (userRole == 'ADMINISTRATOR') return rawIncidents;
+    // Officers/Managers without an assigned station fall back to seeing all.
+    if (userRole != 'OFFICER' && userRole != 'MANAGER') return rawIncidents;
+    final station = _userStation;
+    if (station == null) return rawIncidents;
+
+    final lat = _toDouble(station['latitude']);
+    final lng = _toDouble(station['longitude']);
+    if (lat == null || lng == null) return rawIncidents;
+
+    final radius = _toDouble(station['coverageRadius']) ?? 7.0;
+    return filterIncidentsByProximity(rawIncidents, lat, lng, radius);
+  }
+
+  double? _toDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v);
+    return null;
   }
 
   Future<void> _loadPendingIncidents() async {
@@ -86,12 +134,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     try {
       final fetchedIncidents = await _incidentService.getInProgressIncidents();
+      final filtered = _applyProximityFilter(fetchedIncidents);
       setState(() {
-        incidents = fetchedIncidents;
+        incidents = filtered;
         isLoading = false;
       });
       // Trigger local notifications for any newly seen IN-PROGRESS incidents
-      await _notifyNewInProgressIncidents(fetchedIncidents);
+      await _notifyNewInProgressIncidents(filtered);
     } catch (e) {
       setState(() {
         isLoading = false;
@@ -110,11 +159,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       final fetchedIncidents = await _incidentService.getInProgressIncidents();
       if (!mounted) return;
+      final filtered = _applyProximityFilter(fetchedIncidents);
       setState(() {
-        incidents = fetchedIncidents;
+        incidents = filtered;
       });
       // Trigger notifications for any new ones detected on refresh
-      await _notifyNewInProgressIncidents(fetchedIncidents);
+      await _notifyNewInProgressIncidents(filtered);
 
       // Also refresh pending incidents for admins/managers
       if (_canViewPendingTab) {
@@ -135,23 +185,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _notifyNewInProgressIncidents(List<Map<String, dynamic>> fetched) async {
-    try {
-      for (final incident in fetched) {
+    for (final incident in fetched) {
+      try {
         final id = (incident['_id'] ?? '').toString();
         if (id.isEmpty) continue;
         if (_notifiedIncidentIds.contains(id)) continue;
         final status = (incident['status'] ?? '').toString();
-        if (status == 'IN-PROGRESS') {
-          final type = (incident['incidentType'] ?? 'General').toString();
-          // Fire a local notification
-          await _notificationService.handleIncidentStatusChange(id, status, type);
-          _notifiedIncidentIds.add(id);
-        }
+        if (status != 'IN-PROGRESS') continue;
+        final type = (incident['incidentType'] ?? 'General').toString();
+        await _notificationService.handleIncidentStatusChange(id, status, type);
+        _notifiedIncidentIds.add(id);
+      } catch (e) {
+        // ignore: avoid_print
+        print('🚨 notify error for one incident: $e');
       }
-    } catch (e) {
-      // Best-effort; do not surface to UI
-      // ignore: avoid_print
-      print('🚨 Error notifying for new in-progress incidents: $e');
     }
   }
 

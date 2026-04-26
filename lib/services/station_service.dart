@@ -51,7 +51,7 @@ class StationService {
           // Infer type from name if not provided
           String inferredType = 'Emergency Station';
           final name = station['name']?.toString().toLowerCase() ?? '';
-          
+
           if (name.contains('fire')) {
             inferredType = 'Fire Department';
           } else if (name.contains('police')) {
@@ -59,11 +59,12 @@ class StationService {
           } else if (name.contains('hospital') || name.contains('medical')) {
             inferredType = 'Medical Emergency';
           }
-          
+
           return {
             ...station,
             'type': station['type'] ?? inferredType,
             'emergencyNumber': station['emergencyNumber'] ?? '911',
+            'coverageRadius': _toDouble(station['coverageRadius']) ?? 7.0,
           };
         }).toList();
         
@@ -88,6 +89,21 @@ class StationService {
       // Return empty array on error instead of mock stations to avoid duplicates
       return [];
     }
+  }
+
+  Future<Map<String, dynamic>?> getStationById(String id) async {
+    final stations = await getStations();
+    for (final station in stations) {
+      if (station['_id']?.toString() == id) return station;
+    }
+    return null;
+  }
+
+  double? _toDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v);
+    return null;
   }
 
   List<Map<String, dynamic>> _getMockStations() {
