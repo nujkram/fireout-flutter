@@ -3,7 +3,12 @@
     "allow": [
       "Bash(flutter clean:*)",
       "Bash(./gradlew clean:*)",
-      "Bash(flutter build:*)"
+      "Bash(flutter build:*)",
+      "Bash(curl:*)",
+      "Bash(dir:*)",
+      "Bash(flutter analyze:*)",
+      "Bash(ls:*)",
+      "Bash(echo:*)"
     ],
     "deny": [],
     "ask": []

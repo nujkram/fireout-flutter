@@ -247,20 +247,26 @@ class AuthService {
     }
   }
 
-  Future<Map<String, dynamic>?> signupWithPhone(String phoneNumber, String firstName, String lastName) async {
+  Future<Map<String, dynamic>?> signupWithPhone(
+    String phoneNumber,
+    String firstName,
+    String lastName,
+    String email,
+  ) async {
     try {
       print('🔍 Phone signup attempt - URL: $baseUrl/api/auth/signup-phone');
-      print('🔍 Phone: $phoneNumber, Name: $firstName $lastName');
-      
-      // Try the format that matches Svelte frontend
+      print('🔍 Phone: $phoneNumber, Name: $firstName $lastName, Email: $email');
+
       final requestData = {
         'phone': phoneNumber,
         'firstName': firstName,
         'lastName': lastName,
+        'email': email,
+        'role': 'USER',
       };
-      
+
       print('🔍 Request data: $requestData');
-      
+
       final response = await _dio.post(
         '$baseUrl/api/auth/signup-phone',
         data: requestData,
@@ -270,19 +276,19 @@ class AuthService {
           },
         ),
       );
-      
+
       print('✅ Response status: ${response.statusCode}');
       print('✅ Response data: ${response.data}');
-      
+
       if (response.statusCode == 200) {
-        final data = response.data is String 
-            ? jsonDecode(response.data) 
+        final data = response.data is String
+            ? jsonDecode(response.data)
             : response.data;
-        
+
         if (data['error'] == false) {
           return data;
         } else {
-          print('❌ Signup failed - error in response');
+          print('❌ Signup failed - error in response: ${data['errorMessage']}');
           return null;
         }
       }
@@ -300,16 +306,74 @@ class AuthService {
     }
   }
 
-  Future<Map<String, dynamic>?> verifyOTP(String phoneNumber, String otp) async {
+  Future<String?> getSignupErrorMessage(
+    String phoneNumber,
+    String firstName,
+    String lastName,
+    String email,
+  ) async {
+    try {
+      final response = await _dio.post(
+        '$baseUrl/api/auth/signup-phone',
+        data: {
+          'phone': phoneNumber,
+          'firstName': firstName,
+          'lastName': lastName,
+          'email': email,
+          'role': 'USER',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = response.data is String
+            ? jsonDecode(response.data)
+            : response.data;
+        if (data['error'] == true) {
+          return data['errorMessage'] ?? 'Signup failed';
+        }
+      }
+      return null;
+    } catch (e) {
+      if (e is DioException) {
+        final responseData = e.response?.data;
+        if (responseData != null) {
+          // Handle both Map and String response data
+          if (responseData is Map && responseData['errorMessage'] != null) {
+            return responseData['errorMessage'];
+          } else if (responseData is String) {
+            try {
+              final parsed = jsonDecode(responseData);
+              if (parsed is Map && parsed['errorMessage'] != null) {
+                return parsed['errorMessage'];
+              }
+            } catch (_) {}
+          }
+        }
+        return 'Network error';
+      }
+      return 'An error occurred';
+    }
+  }
+
+  Future<Map<String, dynamic>?> verifyOTP(
+    String tempUserId,
+    String otp,
+    String username,
+    String password,
+  ) async {
     try {
       print('🔍 OTP verification attempt - URL: $baseUrl/api/auth/verify-otp');
-      print('🔍 Phone: $phoneNumber, OTP: $otp');
-      
+      print('🔍 tempUserId: $tempUserId, OTP: $otp, username: $username');
+
+      final hashedPassword = _hashPassword(password);
+
       final response = await _dio.post(
         '$baseUrl/api/auth/verify-otp',
         data: {
-          'phoneNumber': phoneNumber,
+          'tempUserId': tempUserId,
           'otp': otp,
+          'username': username,
+          'password': hashedPassword,
         },
         options: Options(
           headers: {
@@ -364,15 +428,15 @@ class AuthService {
     }
   }
 
-  Future<bool> resendOTP(String phoneNumber) async {
+  Future<Map<String, dynamic>?> resendOTP(String tempUserId) async {
     try {
       print('🔍 Resend OTP attempt - URL: $baseUrl/api/auth/resend-otp');
-      print('🔍 Phone: $phoneNumber');
-      
+      print('🔍 tempUserId: $tempUserId');
+
       final response = await _dio.post(
         '$baseUrl/api/auth/resend-otp',
         data: {
-          'phoneNumber': phoneNumber,
+          'tempUserId': tempUserId,
         },
         options: Options(
           headers: {
@@ -380,63 +444,41 @@ class AuthService {
           },
         ),
       );
-      
+
       print('✅ Response status: ${response.statusCode}');
       print('✅ Response data: ${response.data}');
-      
-      if (response.statusCode == 200) {
-        final data = response.data is String 
-            ? jsonDecode(response.data) 
-            : response.data;
-        
-        return data['error'] == false;
-      }
-      return false;
-    } catch (e) {
-      print('🚨 Exception during resend OTP: $e');
-      return false;
-    }
-  }
 
-  Future<String?> getSignupErrorMessage(String phoneNumber, String firstName, String lastName) async {
-    try {
-      final response = await _dio.post(
-        '$baseUrl/api/auth/signup-phone',
-        data: {
-          'phone': phoneNumber,
-          'firstName': firstName,
-          'lastName': lastName,
-        },
-      );
-      
       if (response.statusCode == 200) {
-        final data = response.data is String 
-            ? jsonDecode(response.data) 
+        final data = response.data is String
+            ? jsonDecode(response.data)
             : response.data;
-        if (data['error'] == true) {
-          return data['errorMessage'] ?? 'Signup failed';
+
+        if (data['error'] == false) {
+          return Map<String, dynamic>.from(data);
         }
       }
       return null;
     } catch (e) {
-      if (e is DioException) {
-        final responseData = e.response?.data;
-        if (responseData != null && responseData['errorMessage'] != null) {
-          return responseData['errorMessage'];
-        }
-        return 'Network error';
-      }
-      return 'An error occurred';
+      print('🚨 Exception during resend OTP: $e');
+      return null;
     }
   }
 
-  Future<String?> getVerificationErrorMessage(String phoneNumber, String otp) async {
+  Future<String?> getVerificationErrorMessage(
+    String tempUserId,
+    String otp,
+    String username,
+    String password,
+  ) async {
     try {
+      final hashedPassword = _hashPassword(password);
       final response = await _dio.post(
         '$baseUrl/api/auth/verify-otp',
         data: {
-          'phoneNumber': phoneNumber,
+          'tempUserId': tempUserId,
           'otp': otp,
+          'username': username,
+          'password': hashedPassword,
         },
       );
       

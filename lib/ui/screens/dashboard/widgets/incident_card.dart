@@ -177,33 +177,52 @@ class IncidentCard extends StatelessWidget {
                         ),
                       ],
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                          color: Colors.orange,
-                          width: 1,
-                        ),
-                      ),
-                      child: Text(
-                        'IN PROGRESS',
-                        style: GoogleFonts.poppins(
-                          fontSize: 11,
-                          color: Colors.orange,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
+                    _buildStatusBadge(incident['status'] ?? 'IN-PROGRESS'),
                   ],
                 ),
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusBadge(String status) {
+    Color badgeColor;
+    String label;
+
+    switch (status.toUpperCase()) {
+      case 'FOR_REVIEW':
+      case 'PENDING_COMPLETION':
+        badgeColor = Colors.amber;
+        label = 'PENDING CONFIRMATION';
+        break;
+      case 'COMPLETED':
+      case 'RESOLVED':
+        badgeColor = Colors.green;
+        label = status.toUpperCase();
+        break;
+      case 'IN-PROGRESS':
+      default:
+        badgeColor = Colors.orange;
+        label = 'IN PROGRESS';
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: badgeColor.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: badgeColor, width: 1),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.poppins(
+          fontSize: 11,
+          color: badgeColor,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );

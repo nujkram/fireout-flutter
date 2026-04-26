@@ -153,9 +153,11 @@ class _LoginScreenState extends State<LoginScreen> {
         context.read<BottomNavCubit>().updateIndex(0);
         return Scaffold(
             backgroundColor: Theme.of(context).primaryColor,
-            body: ConstrainedBox(
-              constraints: const BoxConstraints.expand(),
-              child: _buildBody(),
+            body: SingleChildScrollView(
+              child: SizedBox(
+                height: MediaQuery.of(context).size.height,
+                child: _buildBody(),
+              ),
             ));
       },
     );

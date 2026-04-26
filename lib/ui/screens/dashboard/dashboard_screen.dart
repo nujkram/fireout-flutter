@@ -6,6 +6,7 @@ import 'package:fireout/services/auth_service.dart';
 import 'package:fireout/services/incident_service.dart';
 import 'package:fireout/services/notification_service.dart';
 import 'package:fireout/ui/screens/dashboard/widgets/incident_card.dart';
+import 'package:fireout/ui/screens/dashboard/widgets/pending_confirmation_card.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -19,13 +20,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final IncidentService _incidentService = IncidentService();
   final NotificationService _notificationService = NotificationService();
   List<Map<String, dynamic>> incidents = [];
+  List<Map<String, dynamic>> pendingIncidents = [];
   bool isLoading = true;
+  bool isPendingLoading = false;
   String? userFullName;
   String? userRole;
   Timer? _refreshTimer;
   bool _isSilentRefreshing = false;
+  int _selectedTab = 0; // 0 = In-Progress, 1 = Pending Confirmation
   // Track which incidents we've already notified about in this session
   final Set<String> _notifiedIncidentIds = <String>{};
+  final TextEditingController _rejectionReasonController = TextEditingController();
+
+  bool get _canViewPendingTab =>
+      userRole == 'ADMINISTRATOR' || userRole == 'MANAGER';
 
   @override
   void initState() {
@@ -46,6 +54,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
         userFullName = userData['fullName'] ?? userData['username'];
         userRole = role;
       });
+      // Load pending incidents for admins/managers
+      if (role == 'ADMINISTRATOR' || role == 'MANAGER') {
+        _loadPendingIncidents();
+      }
+    }
+  }
+
+  Future<void> _loadPendingIncidents() async {
+    setState(() => isPendingLoading = true);
+    try {
+      final fetched = await _incidentService.getPendingCompletionIncidents();
+      if (mounted) {
+        setState(() {
+          pendingIncidents = fetched;
+          isPendingLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => isPendingLoading = false);
+      }
+      print('Error loading pending incidents: $e');
     }
   }
 
@@ -85,6 +115,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
       });
       // Trigger notifications for any new ones detected on refresh
       await _notifyNewInProgressIncidents(fetchedIncidents);
+
+      // Also refresh pending incidents for admins/managers
+      if (_canViewPendingTab) {
+        try {
+          final fetchedPending = await _incidentService.getPendingCompletionIncidents();
+          if (mounted) {
+            setState(() {
+              pendingIncidents = fetchedPending;
+            });
+          }
+        } catch (_) {}
+      }
     } catch (_) {
       // Ignore errors during silent refresh to avoid UI disruption
     } finally {
@@ -227,9 +269,199 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  Future<void> _handleConfirm(Map<String, dynamic> incident) async {
+    final incidentId = incident['_id']?.toString();
+    if (incidentId == null) return;
+
+    final completionType = incident['completionType'] ?? 'completed';
+    final label = completionType == 'fire_out' ? 'fire out declaration' : 'completion';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Confirm $label?',
+          style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: Text(
+          'This will officially close the incident and mark it as completed.',
+          style: GoogleFonts.poppins(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: GoogleFonts.poppins(color: Colors.white70)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: Text('Confirm', style: GoogleFonts.poppins(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    // Show loading
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          backgroundColor: Colors.grey[900],
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(color: Colors.green),
+              const SizedBox(width: 16),
+              Text('Confirming...', style: GoogleFonts.poppins(color: Colors.white)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final success = await _incidentService.confirmCompletion(incidentId);
+
+    if (mounted) Navigator.pop(context); // close loading
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            success ? 'Incident confirmed as completed' : 'Failed to confirm incident',
+            style: GoogleFonts.poppins(),
+          ),
+          backgroundColor: success ? Colors.green : Colors.red,
+        ),
+      );
+      if (success) {
+        _loadPendingIncidents();
+        _silentRefreshIncidents();
+      }
+    }
+  }
+
+  Future<void> _handleReject(Map<String, dynamic> incident) async {
+    final incidentId = incident['_id']?.toString();
+    if (incidentId == null) return;
+
+    _rejectionReasonController.clear();
+
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Reject Completion',
+          style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'The incident will return to IN-PROGRESS status. Please provide a reason:',
+              style: GoogleFonts.poppins(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _rejectionReasonController,
+              maxLines: 3,
+              style: GoogleFonts.poppins(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'Reason for rejection...',
+                hintStyle: GoogleFonts.poppins(color: Colors.white38, fontSize: 12),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: Colors.white24),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Colors.red),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: Text('Cancel', style: GoogleFonts.poppins(color: Colors.white70)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final text = _rejectionReasonController.text.trim();
+              if (text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Please provide a rejection reason', style: GoogleFonts.poppins()),
+                    backgroundColor: Colors.orange,
+                  ),
+                );
+                return;
+              }
+              Navigator.pop(context, text);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: Text('Reject', style: GoogleFonts.poppins(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (reason == null || reason.isEmpty) return;
+
+    // Show loading
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          backgroundColor: Colors.grey[900],
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(color: Colors.red),
+              const SizedBox(width: 16),
+              Text('Rejecting...', style: GoogleFonts.poppins(color: Colors.white)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final success = await _incidentService.rejectCompletion(incidentId, reason);
+
+    if (mounted) Navigator.pop(context); // close loading
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            success ? 'Completion rejected. Incident returned to IN-PROGRESS.' : 'Failed to reject completion',
+            style: GoogleFonts.poppins(),
+          ),
+          backgroundColor: success ? Colors.orange : Colors.red,
+        ),
+      );
+      if (success) {
+        _loadPendingIncidents();
+        _silentRefreshIncidents();
+      }
+    }
+  }
+
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _rejectionReasonController.dispose();
     super.dispose();
   }
 
@@ -251,7 +483,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
-            onPressed: _refreshIncidents,
+            onPressed: () {
+              _refreshIncidents();
+              if (_canViewPendingTab) _loadPendingIncidents();
+            },
           ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white),
@@ -260,7 +495,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _refreshIncidents,
+        onRefresh: () async {
+          await _refreshIncidents();
+          if (_canViewPendingTab) await _loadPendingIncidents();
+        },
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Column(
@@ -274,89 +512,277 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   fontWeight: FontWeight.w500,
                 ),
               ),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'In-Progress Incidents',
-                    style: GoogleFonts.poppins(
-                      fontSize: 16,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.orange,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      '${incidents.length}',
-                      style: GoogleFonts.poppins(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
+              const SizedBox(height: 16),
+
+              // Tab switcher for admins/managers
+              if (_canViewPendingTab) ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setState(() => _selectedTab = 0),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: _selectedTab == 0
+                                ? Colors.orange
+                                : Colors.white.withOpacity(0.1),
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(10),
+                              bottomLeft: Radius.circular(10),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'In-Progress',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  color: Colors.white,
+                                  fontWeight: _selectedTab == 0
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.25),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  '${incidents.length}',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: isLoading
-                    ? const Center(
-                        child: CircularProgressIndicator(color: Colors.white),
-                      )
-                    : incidents.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.check_circle_outline,
-                                  size: 64,
-                                  color: Colors.green[300],
-                                ),
-                                const SizedBox(height: 16),
-                                Text(
-                                  'No incidents in progress',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 18,
-                                    color: Colors.white70,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'All clear for now!',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 14,
-                                    color: Colors.white54,
-                                  ),
-                                ),
-                              ],
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setState(() => _selectedTab = 1),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: _selectedTab == 1
+                                ? Colors.amber
+                                : Colors.white.withOpacity(0.1),
+                            borderRadius: const BorderRadius.only(
+                              topRight: Radius.circular(10),
+                              bottomRight: Radius.circular(10),
                             ),
-                          )
-                        : ListView.builder(
-                            itemCount: incidents.length,
-                            itemBuilder: (context, index) {
-                              return IncidentCard(
-                                incident: incidents[index],
-                                onTap: () {
-                                  Navigator.pushNamed(
-                                    context,
-                                    '/incident-detail',
-                                    arguments: incidents[index],
-                                  ).then((_) => _silentRefreshIncidents());
-                                },
-                              );
-                            },
                           ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'Pending',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  color: _selectedTab == 1
+                                      ? Colors.black87
+                                      : Colors.white,
+                                  fontWeight: _selectedTab == 1
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: _selectedTab == 1
+                                      ? Colors.black.withOpacity(0.15)
+                                      : Colors.white.withOpacity(0.25),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  '${pendingIncidents.length}',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12,
+                                    color: _selectedTab == 1
+                                        ? Colors.black87
+                                        : Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // Section header for officers (no tabs)
+              if (!_canViewPendingTab) ...[
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'In-Progress Incidents',
+                      style: GoogleFonts.poppins(
+                        fontSize: 16,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.orange,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${incidents.length}',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // Content area
+              Expanded(
+                child: _selectedTab == 0 || !_canViewPendingTab
+                    ? _buildInProgressList()
+                    : _buildPendingConfirmationList(),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildInProgressList() {
+    if (isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      );
+    }
+
+    if (incidents.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.check_circle_outline,
+              size: 64,
+              color: Colors.green[300],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No incidents in progress',
+              style: GoogleFonts.poppins(
+                fontSize: 18,
+                color: Colors.white70,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'All clear for now!',
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                color: Colors.white54,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      itemCount: incidents.length,
+      itemBuilder: (context, index) {
+        return IncidentCard(
+          incident: incidents[index],
+          onTap: () {
+            Navigator.pushNamed(
+              context,
+              '/incident-detail',
+              arguments: incidents[index],
+            ).then((_) => _silentRefreshIncidents());
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildPendingConfirmationList() {
+    if (isPendingLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: Colors.amber),
+      );
+    }
+
+    if (pendingIncidents.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.pending_actions,
+              size: 64,
+              color: Colors.amber[300],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No pending confirmations',
+              style: GoogleFonts.poppins(
+                fontSize: 18,
+                color: Colors.white70,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'All submissions have been reviewed.',
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                color: Colors.white54,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      itemCount: pendingIncidents.length,
+      itemBuilder: (context, index) {
+        final incident = pendingIncidents[index];
+        return PendingConfirmationCard(
+          incident: incident,
+          onConfirm: () => _handleConfirm(incident),
+          onReject: () => _handleReject(incident),
+          onTap: () {
+            Navigator.pushNamed(
+              context,
+              '/incident-detail',
+              arguments: incident,
+            ).then((_) {
+              _silentRefreshIncidents();
+              _loadPendingIncidents();
+            });
+          },
+        );
+      },
     );
   }
 

@@ -397,24 +397,22 @@ class IncidentService {
   Future<bool> resolveIncident(
     String incidentId, {
     required String resolutionNotes,
+    required String completionType,
     List<Map<String, dynamic>>? resolutionImages,
   }) async {
     try {
       final userId = await _authService.getUserId();
       final userRole = await _authService.getUserRole();
 
-      print('🔄 Resolving incident $incidentId with ${resolutionImages?.length ?? 0} images');
+      print('🔄 Submitting incident $incidentId for admin confirmation with ${resolutionImages?.length ?? 0} images');
 
       final response = await _dio.put(
         '$baseUrl/api/admin/incident/$incidentId/complete',
         data: jsonEncode({
-          'status': 'COMPLETED',
-          'resolutionNotes': resolutionNotes,
-          'resolvedBy': userId,
-          'resolvedByRole': userRole,
-          'resolvedAt': DateTime.now().toIso8601String(),
+          'completionNotes': resolutionNotes,
+          'completionType': completionType,
           if (resolutionImages != null && resolutionImages.isNotEmpty)
-            'resolutionImages': resolutionImages,
+            'completionImages': resolutionImages,
         }),
         options: Options(
           headers: {
@@ -430,9 +428,104 @@ class IncidentService {
       final success = response.statusCode == 200;
 
       if (success) {
-        print('✅ Incident resolved successfully');
+        print('✅ Incident submitted for admin confirmation');
 
-        // Trigger notification for completed status
+        try {
+          _notificationService ??= NotificationService();
+          await _notificationService!.handleIncidentStatusChange(
+            incidentId,
+            'FOR_REVIEW',
+            'Incident'
+          );
+        } catch (e) {
+          print('🚨 Error triggering notification: $e');
+        }
+      }
+
+      return success;
+    } catch (e) {
+      print('🚨 Error submitting incident for confirmation: $e');
+      if (e is DioException) {
+        print('🚨 Dio error type: ${e.type}');
+        print('🚨 Dio message: ${e.message}');
+        print('🚨 Response data: ${e.response?.data}');
+      }
+      return false;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getPendingCompletionIncidents() async {
+    try {
+      print('🔍 Fetching pending completion incidents from: $baseUrl/api/admin/incident/pending-completion');
+
+      final userId = await _authService.getUserId();
+
+      final response = await _dio.get(
+        '$baseUrl/api/admin/incident/pending-completion',
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            if (_authService.authToken != null)
+              'Authorization': 'Bearer ${_authService.authToken}',
+            if (userId != null)
+              'X-User-ID': userId,
+          },
+        ),
+      );
+
+      print('✅ Pending incidents response status: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final data = response.data is String
+            ? jsonDecode(response.data)
+            : response.data;
+
+        if (data is List) {
+          return List<Map<String, dynamic>>.from(data);
+        } else if (data is Map && data['response'] != null) {
+          return List<Map<String, dynamic>>.from(data['response']);
+        } else if (data is Map && data['incidents'] != null) {
+          return List<Map<String, dynamic>>.from(data['incidents']);
+        }
+      }
+
+      return [];
+    } catch (e) {
+      print('🚨 Error fetching pending completion incidents: $e');
+      return _getMockPendingIncidents();
+    }
+  }
+
+  Future<bool> confirmCompletion(String incidentId) async {
+    try {
+      final userId = await _authService.getUserId();
+      final userRole = await _authService.getUserRole();
+
+      print('✅ Confirming completion for incident $incidentId');
+
+      final response = await _dio.put(
+        '$baseUrl/api/admin/incident/$incidentId/confirm-completion',
+        data: jsonEncode({
+          'status': 'COMPLETED',
+          'confirmedBy': userId,
+          'confirmedByRole': userRole,
+          'confirmedAt': DateTime.now().toIso8601String(),
+        }),
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            if (_authService.authToken != null)
+              'Authorization': 'Bearer ${_authService.authToken}',
+            if (userId != null)
+              'X-User-ID': userId,
+          },
+        ),
+      );
+
+      final success = response.statusCode == 200;
+
+      if (success) {
+        print('✅ Incident completion confirmed');
         try {
           _notificationService ??= NotificationService();
           await _notificationService!.handleIncidentStatusChange(
@@ -447,13 +540,100 @@ class IncidentService {
 
       return success;
     } catch (e) {
-      print('🚨 Error resolving incident: $e');
+      print('🚨 Error confirming completion: $e');
       if (e is DioException) {
         print('🚨 Dio error type: ${e.type}');
-        print('🚨 Dio message: ${e.message}');
         print('🚨 Response data: ${e.response?.data}');
       }
       return false;
     }
+  }
+
+  Future<bool> rejectCompletion(String incidentId, String reason) async {
+    try {
+      final userId = await _authService.getUserId();
+      final userRole = await _authService.getUserRole();
+
+      print('❌ Rejecting completion for incident $incidentId');
+
+      final response = await _dio.put(
+        '$baseUrl/api/admin/incident/$incidentId/reject-completion',
+        data: jsonEncode({
+          'status': 'IN-PROGRESS',
+          'rejectionReason': reason,
+          'rejectedBy': userId,
+          'rejectedByRole': userRole,
+          'rejectedAt': DateTime.now().toIso8601String(),
+        }),
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            if (_authService.authToken != null)
+              'Authorization': 'Bearer ${_authService.authToken}',
+            if (userId != null)
+              'X-User-ID': userId,
+          },
+        ),
+      );
+
+      final success = response.statusCode == 200;
+
+      if (success) {
+        print('✅ Incident completion rejected, returned to IN-PROGRESS');
+      }
+
+      return success;
+    } catch (e) {
+      print('🚨 Error rejecting completion: $e');
+      if (e is DioException) {
+        print('🚨 Dio error type: ${e.type}');
+        print('🚨 Response data: ${e.response?.data}');
+      }
+      return false;
+    }
+  }
+
+  List<Map<String, dynamic>> _getMockPendingIncidents() {
+    final now = DateTime.now();
+    return [
+      {
+        '_id': '68977108c8aaec3aecd89010',
+        'userId': 'JRpizMSn5WSrpByg4',
+        'incidentType': 'Fire',
+        'description': 'Warehouse fire at Industrial Zone',
+        'incidentLocation': {
+          'latitude': '14.5995',
+          'longitude': '120.9842',
+        },
+        'status': 'FOR_REVIEW',
+        'completionType': 'fire_out',
+        'completionNotes': 'Fire has been fully extinguished. All areas checked for hotspots.',
+        'submittedBy': 'officer123',
+        'submittedByRole': 'OFFICER',
+        'submittedAt': now.subtract(const Duration(minutes: 30)).toIso8601String(),
+        'createdAt': {
+          '\$date': {
+            '\$numberLong': now.subtract(const Duration(hours: 3)).millisecondsSinceEpoch.toString()
+          }
+        },
+        'updatedAt': {
+          '\$date': {
+            '\$numberLong': now.subtract(const Duration(minutes: 30)).millisecondsSinceEpoch.toString()
+          }
+        },
+        'isActive': true,
+        'priority': 'HIGH',
+        'emergencyLevel': 'Critical',
+        'completionImages': [
+          {
+            'name': 'fire_out_proof.jpg',
+            'type': 'image/jpeg',
+            'size': 25000,
+            'dataBase64': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=='
+          }
+        ],
+        'files': [],
+      },
+    ];
   }
 }

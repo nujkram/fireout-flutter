@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -567,6 +569,12 @@ class _ReportIncidentScreenState extends State<ReportIncidentScreen> {
         myLocationButtonEnabled: false,
         zoomControlsEnabled: true,
         mapType: MapType.normal,
+        // Let the map win pan/drag gestures over the parent SingleChildScrollView.
+        // EagerGestureRecognizer alone is enough — Flutter requires unique recognizer
+        // types in this set, and it eagerly claims any pointer that lands on the map.
+        gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+          Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+        },
       );
       
       return map;

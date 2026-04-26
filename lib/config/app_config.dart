@@ -25,7 +25,7 @@ class AppConfig {
   static void initialize() {
     // Get flavor from build configuration
     // For release builds, this should be set by the build system
-    const String flavor = String.fromEnvironment('FLAVOR', defaultValue: 'development');
+    const String flavor = String.fromEnvironment('FLAVOR', defaultValue: 'production');
     
     print('🔧 App Config - Flavor from environment: $flavor');
     
@@ -56,7 +56,7 @@ class AppConfig {
         _instance = AppConfig._(
           environment: Environment.staging,
           appName: 'Fireout Staging',
-          baseUrl: 'https://fireout-svelte.vercel.app',
+          baseUrl: 'https://fireout.maveousgalley.com',
           mongoConnectionString: 'mongodb+srv://mark:asdf1234@fire.qrebi.mongodb.net/bfpStaging',
           debugMode: true,
         );
@@ -65,8 +65,8 @@ class AppConfig {
         _instance = AppConfig._(
           environment: Environment.production,
           appName: 'Fireout',
-          baseUrl: 'https://fireout-svelte.vercel.app',
-          mongoConnectionString: 'mongodb+srv://mark:asdf1234@fire.qrebi.mongodb.net/bfpProduction',
+          baseUrl: 'https://fireout.maveousgalley.com',
+          mongoConnectionString: 'mongodb+srv://mark:asdf1234@fire.qrebi.mongodb.net/bfpStaging',
           debugMode: false,
         );
         break;

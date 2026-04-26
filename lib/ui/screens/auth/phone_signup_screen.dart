@@ -14,6 +14,7 @@ class _PhoneSignupScreenState extends State<PhoneSignupScreen> {
   final AuthService _authService = AuthService();
   final TextEditingController _firstNameController = TextEditingController();
   final TextEditingController _lastNameController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   bool isLoading = false;
   String? errorMessage;
@@ -22,8 +23,14 @@ class _PhoneSignupScreenState extends State<PhoneSignupScreen> {
   void dispose() {
     _firstNameController.dispose();
     _lastNameController.dispose();
+    _emailController.dispose();
     _phoneController.dispose();
     super.dispose();
+  }
+
+  bool _isValidEmail(String email) {
+    final regex = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+    return regex.hasMatch(email);
   }
 
   String _formatPhoneNumber(String input) {
@@ -55,9 +62,10 @@ class _PhoneSignupScreenState extends State<PhoneSignupScreen> {
 
     final firstName = _firstNameController.text.trim();
     final lastName = _lastNameController.text.trim();
+    final email = _emailController.text.trim().toLowerCase();
     final phoneInput = _phoneController.text.trim();
-    
-    if (firstName.isEmpty || lastName.isEmpty || phoneInput.isEmpty) {
+
+    if (firstName.isEmpty || lastName.isEmpty || email.isEmpty || phoneInput.isEmpty) {
       setState(() {
         isLoading = false;
         errorMessage = 'Please fill in all fields';
@@ -65,8 +73,16 @@ class _PhoneSignupScreenState extends State<PhoneSignupScreen> {
       return;
     }
 
+    if (!_isValidEmail(email)) {
+      setState(() {
+        isLoading = false;
+        errorMessage = 'Please enter a valid email address';
+      });
+      return;
+    }
+
     final formattedPhone = _formatPhoneNumber(phoneInput);
-    
+
     if (!_isValidPhoneNumber(formattedPhone)) {
       setState(() {
         isLoading = false;
@@ -76,28 +92,41 @@ class _PhoneSignupScreenState extends State<PhoneSignupScreen> {
     }
 
     final result = await _authService.signupWithPhone(
-      formattedPhone, 
-      firstName, 
+      formattedPhone,
+      firstName,
       lastName,
+      email,
     );
-    
+
     setState(() {
       isLoading = false;
     });
 
     if (result != null) {
+      final tempUserId = result['tempUserId'] as String?;
+      if (tempUserId == null || tempUserId.isEmpty) {
+        setState(() {
+          errorMessage = 'Server did not return a verification session. Please try again.';
+        });
+        return;
+      }
       if (mounted) {
         Navigator.pushNamed(
           context,
           '/otp-verification',
-          arguments: formattedPhone,
+          arguments: {
+            'tempUserId': tempUserId,
+            'phone': formattedPhone,
+            'expiresAt': result['expiresAt'],
+          },
         );
       }
     } else {
       final error = await _authService.getSignupErrorMessage(
-        formattedPhone, 
-        firstName, 
+        formattedPhone,
+        firstName,
         lastName,
+        email,
       );
       setState(() {
         errorMessage = error ?? 'Signup failed. Please try again.';
@@ -161,6 +190,12 @@ class _PhoneSignupScreenState extends State<PhoneSignupScreen> {
                   ),
                   const SizedBox(height: 20),
                   CustomTextField(
+                    label: 'Email Address',
+                    controller: _emailController,
+                    inputType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 20),
+                  CustomTextField(
                     label: 'Phone Number',
                     controller: _phoneController,
                     inputType: TextInputType.phone,
@@ -218,8 +253,7 @@ class _PhoneSignupScreenState extends State<PhoneSignupScreen> {
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: ConstrainedBox(
-        constraints: const BoxConstraints.expand(),
+      body: SingleChildScrollView(
         child: _buildBody(),
       ),
     );

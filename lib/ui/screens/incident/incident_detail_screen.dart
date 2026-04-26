@@ -504,14 +504,20 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
-                            color: status == 'IN-PROGRESS' ? Colors.orange : Colors.green,
+                            color: status == 'IN-PROGRESS'
+                                ? Colors.orange
+                                : (status == 'FOR_REVIEW' || status == 'PENDING_COMPLETION')
+                                    ? Colors.amber
+                                    : Colors.green,
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
-                            status.replaceAll('-', ' '),
+                            status == 'FOR_REVIEW' ? 'PENDING CONFIRMATION' : status.replaceAll('-', ' ').replaceAll('_', ' '),
                             style: GoogleFonts.poppins(
                               fontSize: 12,
-                              color: Colors.white,
+                              color: (status == 'FOR_REVIEW' || status == 'PENDING_COMPLETION')
+                                  ? Colors.black87
+                                  : Colors.white,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -655,7 +661,7 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                             const SizedBox(width: 12),
                             Expanded(
                               child: ElevatedButton.icon(
-                                onPressed: (!_isLoadingReporter && callerPhone.isNotEmpty) 
+                                onPressed: (!_isLoadingReporter && callerPhone.isNotEmpty)
                                     ? () async {
                                         final url = 'tel:$callerPhone';
                                         final uri = Uri.parse(url);
@@ -664,7 +670,7 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                                         }
                                       }
                                     : null,
-                                icon: _isLoadingReporter 
+                                icon: _isLoadingReporter
                                     ? const SizedBox(
                                         width: 16,
                                         height: 16,
@@ -675,16 +681,16 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                                       )
                                     : const Icon(Icons.phone),
                                 label: Text(
-                                  _isLoadingReporter 
+                                  _isLoadingReporter
                                       ? 'Loading...'
-                                      : callerPhone.isNotEmpty 
+                                      : callerPhone.isNotEmpty
                                           ? 'Call Reporter'
                                           : 'No Phone Available',
                                   style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
                                 ),
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: (!_isLoadingReporter && callerPhone.isNotEmpty) 
-                                      ? Colors.green 
+                                  backgroundColor: (!_isLoadingReporter && callerPhone.isNotEmpty)
+                                      ? Colors.green
                                       : Colors.grey,
                                   foregroundColor: Colors.white,
                                   padding: const EdgeInsets.symmetric(vertical: 12),
@@ -696,12 +702,36 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 12),
-                        if (widget.incident['status'] == 'IN-PROGRESS' && _canUpdateStatus())
+                        if (widget.incident['status'] == 'IN-PROGRESS' && _canUpdateStatus()) ...[
+                          const SizedBox(height: 12),
+                          // Show "Declare Fire Out" button for fire incidents
+                          if (incidentType.toLowerCase() == 'fire')
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: () => _showStatusUpdateDialog('fire_out'),
+                                icon: const Icon(Icons.local_fire_department),
+                                label: Text(
+                                  'Declare Fire Out',
+                                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.deepOrange,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (incidentType.toLowerCase() == 'fire')
+                            const SizedBox(height: 8),
+                          // Show "Mark as Completed" for all incident types
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton.icon(
-                              onPressed: () => _showStatusUpdateDialog(),
+                              onPressed: () => _showStatusUpdateDialog('completed'),
                               icon: const Icon(Icons.check_circle),
                               label: Text(
                                 'Mark as Completed',
@@ -717,6 +747,7 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                               ),
                             ),
                           ),
+                        ],
                       ],
                     ),
                   ],
@@ -1034,9 +1065,18 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     return _userRole == 'ADMINISTRATOR' || _userRole == 'MANAGER' || _userRole == 'OFFICER';
   }
 
-  void _showStatusUpdateDialog() {
+  void _showStatusUpdateDialog(String completionType) {
     _resolutionImages.clear();
     _resolutionNotesController.clear();
+
+    final isFireOut = completionType == 'fire_out';
+    final dialogTitle = isFireOut ? 'Declare Fire Out' : 'Mark as Completed';
+    final dialogIcon = isFireOut ? Icons.local_fire_department : Icons.check_circle_outline;
+    final dialogColor = isFireOut ? Colors.deepOrange : Colors.green;
+    final dialogHint = isFireOut
+        ? 'Describe the current state of the scene...'
+        : 'Describe how the incident was resolved...';
+    final submitLabel = isFireOut ? 'Submit Fire Out' : 'Submit Completion';
 
     showDialog(
       context: context,
@@ -1044,11 +1084,13 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
         builder: (context, setState) => AlertDialog(
           title: Row(
             children: [
-              const Icon(Icons.check_circle_outline, color: Colors.green),
+              Icon(dialogIcon, color: dialogColor),
               const SizedBox(width: 8),
-              Text(
-                'Complete Incident',
-                style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+              Expanded(
+                child: Text(
+                  dialogTitle,
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                ),
               ),
             ],
           ),
@@ -1059,9 +1101,25 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Add resolution details and photos:',
-                    style: GoogleFonts.poppins(fontSize: 14),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.amber.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline, color: Colors.amber.shade700, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'This will be sent for admin confirmation before the incident is officially closed.',
+                            style: GoogleFonts.poppins(fontSize: 12, color: Colors.amber.shade900),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 16),
 
@@ -1070,8 +1128,8 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                     controller: _resolutionNotesController,
                     maxLines: 3,
                     decoration: InputDecoration(
-                      labelText: 'Resolution Notes',
-                      hintText: 'Describe how the incident was resolved...',
+                      labelText: 'Resolution Notes *',
+                      hintText: dialogHint,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -1083,13 +1141,25 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
 
                   const SizedBox(height: 16),
 
-                  // Image Capture Section
-                  Text(
-                    'Resolution Photos (Optional)',
-                    style: GoogleFonts.poppins(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
+                  // Image Capture Section - Required
+                  Row(
+                    children: [
+                      Text(
+                        'Proof Photo(s) *',
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '(at least 1 required)',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: Colors.red.shade400,
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 8),
 
@@ -1193,8 +1263,21 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                         return;
                       }
 
+                      if (_resolutionImages.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'At least 1 proof photo is required',
+                              style: GoogleFonts.poppins(),
+                            ),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                        return;
+                      }
+
                       Navigator.pop(context);
-                      await _updateIncidentStatus();
+                      await _updateIncidentStatus(completionType);
                     },
               icon: _isResolvingIncident
                   ? const SizedBox(
@@ -1205,13 +1288,13 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                         valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                       ),
                     )
-                  : const Icon(Icons.check),
+                  : Icon(isFireOut ? Icons.local_fire_department : Icons.check),
               label: Text(
-                _isResolvingIncident ? 'Completing...' : 'Complete Incident',
+                _isResolvingIncident ? 'Submitting...' : submitLabel,
                 style: GoogleFonts.poppins(),
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
+                backgroundColor: dialogColor,
                 foregroundColor: Colors.white,
               ),
             ),
@@ -1337,7 +1420,7 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     }
   }
 
-  Future<void> _updateIncidentStatus() async {
+  Future<void> _updateIncidentStatus(String completionType) async {
     setState(() {
       _isResolvingIncident = true;
     });
@@ -1368,19 +1451,21 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
         throw Exception('Incident ID not found');
       }
 
-      // Call the incident service to resolve the incident
+      // Call the incident service to submit for admin confirmation
       final success = await _incidentService.resolveIncident(
         incidentId,
         resolutionNotes: _resolutionNotesController.text.trim(),
+        completionType: completionType,
         resolutionImages: resolutionImageData,
       );
 
       if (mounted) {
         if (success) {
+          final label = completionType == 'fire_out' ? 'Fire out declaration' : 'Completion request';
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Incident marked as completed successfully',
+                '$label submitted. Awaiting admin confirmation.',
                 style: GoogleFonts.poppins(),
               ),
               backgroundColor: Colors.green,
@@ -1393,7 +1478,7 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Failed to update incident status',
+                'Failed to submit for confirmation',
                 style: GoogleFonts.poppins(),
               ),
               backgroundColor: Colors.red,
@@ -1407,7 +1492,7 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Failed to update status: $e',
+              'Failed to submit: $e',
               style: GoogleFonts.poppins(),
             ),
             backgroundColor: Colors.red,
