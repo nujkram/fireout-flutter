@@ -185,6 +185,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _notifyNewInProgressIncidents(List<Map<String, dynamic>> fetched) async {
+    // Local-poll notifications must match backend FCM routing: only ding when
+    // the incident's responding station equals the user's station. Without
+    // this, officers in nearby stations (within proximity-filter range) and
+    // administrators (who see the raw list) would get a local ding for every
+    // new in-progress incident, even though FCM only targets the assigned
+    // station's officers.
+    final userStationId = (_userStation?['_id'] ?? '').toString();
+    if (userStationId.isEmpty) return;
+
     for (final incident in fetched) {
       try {
         final id = (incident['_id'] ?? '').toString();
@@ -192,6 +201,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (_notifiedIncidentIds.contains(id)) continue;
         final status = (incident['status'] ?? '').toString();
         if (status != 'IN-PROGRESS') continue;
+        final incidentStationId = (incident['stationId'] ?? '').toString();
+        if (incidentStationId != userStationId) continue;
         final type = (incident['incidentType'] ?? 'General').toString();
         await _notificationService.handleIncidentStatusChange(id, status, type);
         _notifiedIncidentIds.add(id);

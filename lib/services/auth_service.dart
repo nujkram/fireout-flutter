@@ -4,6 +4,8 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:fireout/config/app_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:crypto/crypto.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:convert';
 
@@ -174,9 +176,20 @@ class AuthService {
   }
 
   Future<void> logout() async {
+    // Invalidate the FCM token before clearing the session so the device
+    // doesn't keep receiving pushes targeted at the previous user/station.
+    // Best-effort: any failure here must not block the logout flow.
+    try {
+      if (!kIsWeb && Firebase.apps.isNotEmpty) {
+        await FirebaseMessaging.instance.deleteToken();
+      }
+    } catch (_) {
+      // ignore — logout proceeds regardless
+    }
+
     _authToken = null;
     _dio.options.headers.remove('Authorization');
-    
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
     await prefs.remove('user_data');
